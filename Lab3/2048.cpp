@@ -26,6 +26,7 @@
 #include <sstream>
 #include <fstream>
 #include <cmath>
+#include <tuple>
 
 /**
  * output streams
@@ -463,16 +464,28 @@ public:
 	 * estimate the value of a given board
 	 */
 	virtual float estimate(const board& b) const {
-		// TODO
-
+        float val = 0.f;
+        for(int i = 0;i<iso_last;++i){
+            val += (*this)[indexof(isomorphic[i],b)];
+            //val += operator[](indexof(isomorphic[i],b));
+        }
+        return val;
 	}
 
 	/**
 	 * update the value of a given board, and return its updated value
 	 */
 	virtual float update(const board& b, float u) {
-		// TODO
-
+		float val = 0.f;
+        u /= iso_last;
+        for(int i=0;i<iso_last;++i){
+            size_t code = indexof(isomorphic[i],b);
+            (*this)[code] += u;
+            //operator[](code) += u;
+            val += (*this)[code];
+            //val += operator[](code);
+        }
+        return val;
 	}
 
 	/**
@@ -509,7 +522,13 @@ public:
 protected:
 
 	size_t indexof(const std::vector<int>& patt, const board& b) const {
-		// TODO
+        //encode pattern in the board
+        size_t code = 0;
+        //every 4 bits represent a number in board 
+        for(size_t i=0;i<patt.size();++i){
+            code |= b.at(patt.at(i)) << (i*4);
+        }
+        return code;
 	}
 
 	std::string nameof(const std::vector<int>& patt) const {
@@ -680,8 +699,7 @@ public:
 		state* best = after;
 		for (state* move = after; move != after + 4; move++) {
 			if (move->assign(b)) {
-				// TODO
-
+                move->set_value(estimate(move->after_state())+move->reward());
 				if (move->value() > best->value())
 					best = move;
 			} else {
@@ -707,8 +725,21 @@ public:
 	 *  where (x,x,x,x) means (before state, after state, action, reward)
 	 */
 	void update_episode(std::vector<state>& path, float alpha = 0.1) const {
-		// TODO
-
+        float exact = 0;
+		for (path.pop_back() /* terminal state */; path.size(); path.pop_back()) {
+			state& move = path.back();
+			float error = exact - (move.value() - move.reward());
+			debug << "update error = " << error << " for after state" << std::endl << move.after_state();
+			exact = move.reward() + update(move.after_state(), alpha * error);
+		}
+        /*
+        float exact = 0.f;
+        for(size_t i = path.size()-2;i>=0;--i){
+            state & s = path[i];
+            float delta = exact - (s.value()-s.reward());
+            exact = s.reward() + update(s.after_state(), alpha * delta);
+        }
+        path.clear();*/
 	}
 
 	/**
@@ -744,6 +775,8 @@ public:
 			}
 			int sum = std::accumulate(scores.begin(), scores.end(), 0);
 			int max = *std::max_element(scores.begin(), scores.end());
+            int min = *std::min_element(scores.begin(), scores.end());
+            int max_tile = *std::max_element(maxtile.begin(), maxtile.end());
 			int stat[16] = { 0 };
 			for (int i = 0; i < 16; i++) {
 				stat[i] = std::count(maxtile.begin(), maxtile.end(), i);
@@ -760,10 +793,27 @@ public:
 				info << "\t" << ((1 << t) & -2u) << "\t" << (accu * coef) << "%";
 				info << "\t(" << (stat[t] * coef) << "%)" << std::endl;
 			}
+
+            std::tuple<int,int,int,int,int> r(n,min,max,mean,1 << max_tile);
+            record.push_back(r);
 			scores.clear();
 			maxtile.clear();
 		}
 	}
+
+    void log(const std::string& path){
+        std::ofstream fout{path};
+        if(!fout){
+            std::cerr << "Error: can not open file "<< path <<std::endl;
+            exit(1);
+        }
+        for(size_t i = 0;i<record.size();++i){
+            int n,min_s,max_s,mean_s,max_t;
+            std::tie(n,min_s,max_s,mean_s,max_t) = record.at(i);
+            fout << n << " " << min_s << " " << max_s << " " << mean_s << " " << max_t << std::endl;
+        }
+        fout.close();
+    }
 
 	/**
 	 * display the weight information of a given board
@@ -820,6 +870,7 @@ private:
 	std::vector<feature*> feats;
 	std::vector<int> scores;
 	std::vector<int> maxtile;
+    std::vector<std::tuple<int,int,int,int,int>> record; //episode, min_score, max_score, mean_score, max_tile
 };
 
 int main(int argc, const char* argv[]) {
@@ -843,7 +894,8 @@ int main(int argc, const char* argv[]) {
 	tdl.add_feature(new pattern({ 4, 5, 6, 8, 9, 10 }));
 
 	// restore the model from file
-	tdl.load("");
+	tdl.load("model");
+
 
 	// train the model
 	std::vector<state> path;
@@ -878,7 +930,8 @@ int main(int argc, const char* argv[]) {
 	}
 
 	// store the model into file
-	tdl.save("");
+	tdl.save("model");
+    tdl.log("data.log");
 
 	return 0;
 }
