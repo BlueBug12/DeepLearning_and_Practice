@@ -393,8 +393,10 @@ protected:
 		static size_t limit = (1 << 30) / sizeof(float); // 1G memory
 		try {
 			total += num;
+            return new float[num]();
+            /*
 			if (total > limit) throw std::bad_alloc();
-			return new float[num]();
+			return new float[num]();*/
 		} catch (std::bad_alloc&) {
 			error << "memory limit exceeded" << std::endl;
 			std::exit(-1);
@@ -699,7 +701,24 @@ public:
 		state* best = after;
 		for (state* move = after; move != after + 4; move++) {
 			if (move->assign(b)) {
-                move->set_value(estimate(move->after_state())+move->reward());
+                int num = 0;
+                float val = 0.f;
+                board tmp;
+                for (int i = 0; i < 16; i++) {
+                    if (move->after_state().at(i) == 0) {
+                        //90% set 2 
+                        tmp = board(move->after_state()); 
+                        tmp.set(i, 1);
+                        val += 0.9 * estimate(tmp);
+
+                        //10% set 4
+                        tmp = board(move->after_state()); 
+                        tmp.set(i, 2);
+                        val += 0.1 * estimate(tmp);
+                        num++;
+                    }
+                }
+                move->set_value(move->reward() + val / num);
 				if (move->value() > best->value())
 					best = move;
 			} else {
@@ -725,21 +744,12 @@ public:
 	 *  where (x,x,x,x) means (before state, after state, action, reward)
 	 */
 	void update_episode(std::vector<state>& path, float alpha = 0.1) const {
-        float exact = 0;
-		for (path.pop_back() /* terminal state */; path.size(); path.pop_back()) {
-			state& move = path.back();
-			float error = exact - (move.value() - move.reward());
-			debug << "update error = " << error << " for after state" << std::endl << move.after_state();
-			exact = move.reward() + update(move.after_state(), alpha * error);
-		}
-        /*
-        float exact = 0.f;
-        for(size_t i = path.size()-2;i>=0;--i){
-            state & s = path[i];
-            float delta = exact - (s.value()-s.reward());
-            exact = s.reward() + update(s.after_state(), alpha * delta);
-        }
-        path.clear();*/
+       float v_s_next = 0.f;
+       for (path.pop_back() ; path.size(); path.pop_back()) {
+            state& move = path.back();
+            float error = move.reward() + v_s_next - estimate(move.before_state());
+            v_s_next = update(move.before_state(), alpha * error);
+       }
 	}
 
 	/**
@@ -794,7 +804,7 @@ public:
 				info << "\t(" << (stat[t] * coef) << "%)" << std::endl;
 			}
 
-            std::tuple<int,int,int,int,int> r(n,min,max,mean,1 << max_tile);
+            std::tuple<int,int,int,int> r(min,max,mean,1 << max_tile);
             record.push_back(r);
 			scores.clear();
 			maxtile.clear();
@@ -802,15 +812,25 @@ public:
 	}
 
     void log(const std::string& path){
-        std::ofstream fout{path};
+        std::fstream test_f;
+        test_f.open(path);
+        bool first = false;
+        if(test_f.is_open()){
+            test_f.close();
+        }else{
+            first = true;
+        }
+        std::ofstream fout{path, std::ios_base::app};
         if(!fout){
             std::cerr << "Error: can not open file "<< path <<std::endl;
             exit(1);
         }
+        if(first)
+            fout << "min_score,max_score,mean_score,max_tile" << std::endl;
         for(size_t i = 0;i<record.size();++i){
-            int n,min_s,max_s,mean_s,max_t;
-            std::tie(n,min_s,max_s,mean_s,max_t) = record.at(i);
-            fout << n << " " << min_s << " " << max_s << " " << mean_s << " " << max_t << std::endl;
+            int min_s,max_s,mean_s,max_t;
+            std::tie(min_s,max_s,mean_s,max_t) = record.at(i);
+            fout << min_s << "," << max_s << "," << mean_s << "," << max_t << std::endl;
         }
         fout.close();
     }
@@ -870,7 +890,7 @@ private:
 	std::vector<feature*> feats;
 	std::vector<int> scores;
 	std::vector<int> maxtile;
-    std::vector<std::tuple<int,int,int,int,int>> record; //episode, min_score, max_score, mean_score, max_tile
+    std::vector<std::tuple<int,int,int,int>> record; //episode, min_score, max_score, mean_score, max_tile
 };
 
 int main(int argc, const char* argv[]) {
@@ -890,11 +910,15 @@ int main(int argc, const char* argv[]) {
 	// initialize the features
 	tdl.add_feature(new pattern({ 0, 1, 2, 3, 4, 5 }));
 	tdl.add_feature(new pattern({ 4, 5, 6, 7, 8, 9 }));
+    //tdl.add_feature(new pattern({ 0, 1, 2, 3, 4, 5, 9}));
 	tdl.add_feature(new pattern({ 0, 1, 2, 4, 5, 6 }));
 	tdl.add_feature(new pattern({ 4, 5, 6, 8, 9, 10 }));
 
+    std::string model_name = "test_model_";
+    std::string log_name = "test.csv";
+
 	// restore the model from file
-	tdl.load("model");
+	tdl.load(model_name);
 
 
 	// train the model
@@ -930,8 +954,8 @@ int main(int argc, const char* argv[]) {
 	}
 
 	// store the model into file
-	tdl.save("model");
-    tdl.log("data.log");
+	tdl.save(model_name);
+    tdl.log(log_name);
 
 	return 0;
 }
