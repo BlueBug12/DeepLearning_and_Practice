@@ -395,7 +395,7 @@ if __name__ == '__main__':
         test_loader = test_loader,
         optimizer = optimizer,
         criterion = nn.CrossEntropyLoss(),
-        epoch_num = 10,
+        epoch_num = args.epoch_num,
         logger_path = os.path.join(args.log_dir,model_name),
         model_path = os.path.join(args.model_dir,model_name)
     )
