@@ -17,6 +17,7 @@ from PIL import Image
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 from argparse import ArgumentParser
+import time
 
 # In[2]:
 
@@ -127,19 +128,20 @@ class BasicBlock(nn.Module):
         return out
     
 class Bottleneck(nn.Module):
-    def __init__(self, in_channel, out_channel, s=1):
+    def __init__(self, in_channel,mid_channel, out_channel, s=1, down_s=-1):
         super(Bottleneck, self).__init__()
         self.conv1 = nn.Conv2d(in_channel, mid_channel, kernel_size=(1, 1), stride=(1, 1), bias=False)
         self.bn1 = nn.BatchNorm2d(mid_channel, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
         self.conv2 = nn.Conv2d(mid_channel, mid_channel, kernel_size=(3, 3), stride=s, padding=(1, 1), bias=False)
-        if s!= 1:
-            self.identity = downsample(in_channel, out_channel, s)
+        if down_s!=-1:
+            self.identity = downsample(in_channel, out_channel, down_s)
         else:
             self.identity = lambda x:x
         self.bn2 = nn.BatchNorm2d(mid_channel, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
         self.conv3 = nn.Conv2d(mid_channel, out_channel, kernel_size=(1, 1), stride=(1, 1), bias=False)
         self.bn3 = nn.BatchNorm2d(out_channel, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
         self.relu = nn.ReLU(inplace=True)
+        
         
     def forward(self,x):
         out = self.conv1(x)
@@ -148,6 +150,7 @@ class Bottleneck(nn.Module):
         out = self.conv2(out)
         out = self.bn2(out)
         out = self.relu(out)
+        out = self.conv3(out)
         out = self.bn3(out)
         out2 = self.identity(x)
         out = self.relu(out+out2)
@@ -211,18 +214,18 @@ class ResNet50(nn.Module):
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1, dilation=1,ceil_mode=False)
         
         self.layer1 = nn.Sequential(
-            Bottleneck(64, 64, 256),
+            Bottleneck(64, 64, 256, 1, 1),
             Bottleneck(256, 64, 256),
             Bottleneck(256, 64, 256)
         )
         self.layer2 = nn.Sequential(
-            Bottleneck(256, 128, 512, 2),
+            Bottleneck(256, 128, 512, 2, 2),
             Bottleneck(512, 128, 512),
             Bottleneck(512, 128, 512),
             Bottleneck(512, 128, 512)
         )
         self.layer3 = nn.Sequential(
-            Bottleneck(512, 256, 1024, 2),
+            Bottleneck(512, 256, 1024, 2, 2),
             Bottleneck(1024, 256, 1024),
             Bottleneck(1024, 256, 1024),
             Bottleneck(1024, 256, 1024),
@@ -230,7 +233,7 @@ class ResNet50(nn.Module):
             Bottleneck(1024, 256, 1024)
         )
         self.layer4 = nn.Sequential(
-            Bottleneck(1024, 512, 2048, 2),
+            Bottleneck(1024, 512, 2048, 2, 2),
             Bottleneck(2048, 512, 2048),
             Bottleneck(2048, 512, 2048)
         )
@@ -315,7 +318,7 @@ def train(model, device, train_loader, test_loader, optimizer, criterion, epoch_
               'train_loss': train_loss_list,
               'test_acc': test_acc_list,
               'test_loss': test_loss_list}
-    with open(f'{getTime()}.pickle', 'wb') as f:
+    with open(os.path.join(logger_path,f'{getTime()}.pickle' ), 'wb') as f:
         pickle.dump(result, f)
 
 # In[ ]:
@@ -377,10 +380,11 @@ if __name__ == '__main__':
     else:
         print("Unexpected model name")
         exit(1)
-
+    #print(model)
+     
     model.to(device)
-#optimizer = torch.optim.SGD(model.parameters(),lr=1e-3,momentum=0.9,weight_decay=0)
-    optimizer = torch.optim.RAdam(model.parameters(),lr=1e-3,weight_decay=0)
+    optimizer = torch.optim.SGD(model.parameters(),lr=1e-3,momentum=0.9,weight_decay=0)
+    #optimizer = torch.optim.RAdam(model.parameters(),lr=1e-3,weight_decay=0)
 
     #writer = SummaryWriter(os.path.join("logs","ResNet18"))
 
@@ -395,6 +399,8 @@ if __name__ == '__main__':
         logger_path = os.path.join(args.log_dir,model_name),
         model_path = os.path.join(args.model_dir,model_name)
     )
+    
+    
 
 
 # In[ ]:
