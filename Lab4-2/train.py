@@ -21,6 +21,12 @@ import time
 
 # In[2]:
 
+def setup_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+
 def getTime():
     nowTime = int(time.time()) 
     struct_time = time.localtime(nowTime) 
@@ -306,12 +312,6 @@ def train(model, device, train_loader, test_loader, optimizer, criterion, epoch_
         train_loss_list.append(train_loss)
         test_acc_list.append(test_acc)
         test_loss_list.append(test_loss)
-        '''
-        logger.add_scalar('train/loss', train_loss, epoch)
-        logger.add_scalar('train/acc', train_acc, epoch)
-        logger.add_scalar('test/loss', test_loss, epoch)
-        logger.add_scalar('test/acc', test_acc, epoch)
-        '''
         print(f"[train] [epoch:{epoch:>4}/{epoch_num}] train acc: {train_acc:.4f}, test acc: {test_acc:.4f}")
         #epoch_pbar.set_description(f'[train] [epoch:{epoch:>4}/{epoch_num}] train acc: {train_acc:.4f}, test acc: {test_acc:.4f}')
     result = {'train_acc': train_acc_list,
@@ -323,7 +323,7 @@ def train(model, device, train_loader, test_loader, optimizer, criterion, epoch_
 
 # In[ ]:
 if __name__ == '__main__':
-
+    setup_seed(87)
     parser = ArgumentParser()
     parser.add_argument("--model",        type=str,            default="ResNet18")
     parser.add_argument("--batch_size",   type=int,            default=16)
@@ -346,7 +346,7 @@ if __name__ == '__main__':
         print("Use GPU for training...")
         cuda_kwargs = {'num_workers': 32,
                        'pin_memory': True,
-                       'shuffle': False}
+                       'shuffle': True}
         train_kwargs.update(cuda_kwargs)
         test_kwargs.update(cuda_kwargs)
     else:
@@ -383,7 +383,7 @@ if __name__ == '__main__':
     #print(model)
      
     model.to(device)
-    optimizer = torch.optim.SGD(model.parameters(),lr=1e-3,momentum=0.9,weight_decay=0)
+    optimizer = torch.optim.SGD(model.parameters(),lr=1e-2,momentum=0.9,weight_decay=0)
     #optimizer = torch.optim.RAdam(model.parameters(),lr=1e-3,weight_decay=0)
 
     #writer = SummaryWriter(os.path.join("logs","ResNet18"))
