@@ -58,7 +58,9 @@ class gaussian_lstm(nn.Module):
         return hidden
 
     def reparameterize(self, mu, logvar):
-        raise NotImplementedError
+        logvar = logvar.mul(0.5).exp_()
+        eps = Variable(logvar.data.new(logvar.size()).normal_())
+        return eps.mul(logvar).add_(mu)
 
     def forward(self, input):
         embedded = self.embed(input)

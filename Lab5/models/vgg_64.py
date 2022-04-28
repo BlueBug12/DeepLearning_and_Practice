@@ -47,12 +47,22 @@ class vgg_encoder(nn.Module):
                 )
         self.mp = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
 
-    def forward(self, input):
+    def forward(self, input,cond):
+        '''
+        ]h1: torch.Size([10, 64, 64, 64])
+        h2: torch.Size([10, 128, 32, 32])
+        h3: torch.Size([10, 256, 16, 16])
+        h4: torch.Size([10, 512, 8, 8])
+        h5: torch.Size([10, 128, 1, 1])
+        h6: torch.Size([10, 128])
+        '''
         h1 = self.c1(input) # 64 -> 32
         h2 = self.c2(self.mp(h1)) # 32 -> 16
         h3 = self.c3(self.mp(h2)) # 16 -> 8
         h4 = self.c4(self.mp(h3)) # 8 -> 4
         h5 = self.c5(self.mp(h4)) # 4 -> 1
+        h6 = h5.view(-1, self.dim)
+        
         return h5.view(-1, self.dim), [h1, h2, h3, h4]
 
 
