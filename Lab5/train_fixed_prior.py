@@ -40,7 +40,7 @@ def parse_args():
     parser.add_argument('--seed', default=1, type=int, help='manual seed')
     parser.add_argument('--n_past', type=int, default=5, help='number of frames to condition on')
     parser.add_argument('--n_future', type=int, default=5, help='number of frames to predict')
-    parser.add_argument('--n_eval', type=int, default=30, help='number of frames to predict at eval time')
+    parser.add_argument('--n_eval', type=int, default=10, help='number of frames to predict at eval time')
     parser.add_argument('--rnn_size', type=int, default=256, help='dimensionality of hidden layer')
     parser.add_argument('--posterior_rnn_layers', type=int, default=1, help='number of layers')
     parser.add_argument('--predictor_rnn_layers', type=int, default=2, help='number of layers')
@@ -71,8 +71,8 @@ def train(x, cond, modules, optimizer, kl_anneal, args):
     kld = 0
     use_teacher_forcing = True if random.random() < args.tfr else False
     for i in range(1, args.n_past + args.n_future):
-        h = modules['encoder'](x[i-1],cond)
-        h_target = modules['encoder'](x[i],cond)[0]
+        h = modules['encoder'](x[i-1],cond[i-1])
+        h_target = modules['encoder'](x[i],cond[i])[0]
         if args.last_frame_skip or i < args.n_past:        
             h, skip = h
         else:
@@ -80,7 +80,7 @@ def train(x, cond, modules, optimizer, kl_anneal, args):
         z_t, mu, logvar = modules['posterior'](h_target)
         _, mu_p, logvar_p = modules['prior'](h)
         h_pred = modules['frame_predictor'](torch.cat([h, z_t], 1))
-        x_pred = modules['decoder']([h_pred, skip])
+        x_pred = modules['decoder']([h_pred, skip],cond[i])
         #print(type(x_pred))
         #print(x_pred.shape)
         #print(type(x[i]))
@@ -111,8 +111,8 @@ def pred(validate_seq, validate_cond, modules, args, device):
     img_seq = []
     with torch.no_grad():
         for i in range(1, args.n_past + args.n_future):
-            h = modules['encoder'](validate_seq[i-1],validate_cond)
-            h_target = modules['encoder'](validate_seq[i],validate_cond)[0]
+            h = modules['encoder'](validate_seq[i-1],validate_cond[i-1])
+            h_target = modules['encoder'](validate_seq[i],validate_cond[i])[0]
             if args.last_frame_skip or i < args.n_past:        
                 h, skip = h
             else:
@@ -120,7 +120,7 @@ def pred(validate_seq, validate_cond, modules, args, device):
             z_t, mu, logvar = modules['posterior'](h_target)
             _, mu_p, logvar_p = modules['prior'](h)
             h_pred = modules['frame_predictor'](torch.cat([h, z_t], 1))
-            x_pred = modules['decoder']([h_pred, skip])
+            x_pred = modules['decoder']([h_pred, skip],validate_cond[i])
             img_seq.append(x_pred)
             mse += mse_criterion(x_pred, validate_seq[i])
             kld += kl_criterion(mu, logvar, mu_p, logvar_p,args)
@@ -350,15 +350,15 @@ def main():
                     'last_epoch': epoch},
                     '%s/model.pth' % args.log_dir)
 
-        if epoch % 20 == 0:
+        if epoch % 2 == 0:
             try:
                 validate_seq, validate_cond = next(validate_iter)
             except StopIteration:
                 validate_iter = get_batch(validate_loader)
                 validate_seq, validate_cond = next(validate_iter)
 
-            #plot_pred(validate_seq, validate_cond, modules, epoch, args)
-            #plot_rec(validate_seq, validate_cond, modules, epoch, args)
+            plot_pred(validate_seq, validate_cond, modules, epoch, args)
+            plot_rec(validate_seq, validate_cond, modules, epoch, args)
 
 if __name__ == '__main__':
     main()

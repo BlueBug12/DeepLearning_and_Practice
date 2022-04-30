@@ -101,7 +101,7 @@ class vgg_decoder(nn.Module):
                 )
         self.up = nn.UpsamplingNearest2d(scale_factor=2)
 
-    def forward(self, input):
+    def forward(self, input,cond):
         vec, skip = input 
         d1 = self.upc1(vec.view(-1, self.dim, 1, 1)) # 1 -> 4
         up1 = self.up(d1) # 4 -> 8

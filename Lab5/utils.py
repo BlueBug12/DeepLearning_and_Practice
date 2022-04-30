@@ -181,10 +181,89 @@ def image_tensor(inputs, padding=1):
                    (i+1) * y_dim + i * padding].copy_(image)
         return result
 
-def plot_pred():
-    pass
+def plot_pred(validate_seq, validate_cond, modules, epoch, args):
+    #shape of validate_seq: ((n_past+n_future) x batch_size x 3 x 64 x 64)
+    nsample = 20 
+    gen_seq = [[] for i in range(nsample)]
+    gt_seq = [validate_seq[i] for i in range(len(validate_seq))]
+
+    for s in range(nsample):
+        modules['frame_predictor'].hidden = modules['frame_predictor'].init_hidden()
+        modules['prior'].hidden = modules['prior'].init_hidden()
+        modules['posterior'].hidden = modules['posterior'].init_hidden()
+        gen_seq[s].append(validate_seq[0])
+        x_in = validate_seq[0]
+        for i in range(1, args.n_eval):
+            h = modules['encoder'](x_in,validate_cond[i-1])
+            if args.last_frame_skip or i < args.n_past:	
+                h, skip = h
+            else:
+                h, _ = h
+            h = h.detach()
+            if i < args.n_past:
+                h_target = modules['encoder'](validate_seq[i],validate_cond[i])
+                h_target = h_target[0].detach()
+                z_t, _, _ = modules['posterior'](h_target)
+                #prior(h)
+                modules['frame_predictor'](torch.cat([h, z_t], 1))
+                x_in = validate_seq[i]
+                gen_seq[s].append(x_in)
+            else:
+                z_t, _, _ = modules['prior'](h)
+                h = modules['frame_predictor'](torch.cat([h, z_t], 1)).detach()
+                x_in = modules['decoder']([h, skip],validate_cond[i]).detach()
+                gen_seq[s].append(x_in)
+
+    to_plot = []
+    gifs = [ [] for t in range(args.n_eval) ]#args.n_past + args.n_future
+    nrow = min(args.batch_size, 10)
+    for i in range(nrow):
+        # ground truth sequence
+        row = [] 
+        for t in range(args.n_eval):
+            row.append(gt_seq[t][i])
+        to_plot.append(row)#append a seqence of ground truth image(i_th batch)
+
+        # best sequence
+        min_mse = 1e7
+        for s in range(nsample):
+            mse = 0
+            for t in range(args.n_eval):
+                mse +=  torch.sum( (gt_seq[t][i].data.cpu() - gen_seq[s][t][i].data.cpu())**2 )
+            if mse < min_mse:
+                min_mse = mse
+                min_idx = s
+
+        s_list = [min_idx, 
+                  np.random.randint(nsample), 
+                  np.random.randint(nsample), 
+                  np.random.randint(nsample), 
+                  np.random.randint(nsample)]
+        for ss in range(len(s_list)):
+            s = s_list[ss]
+            row = []
+            for t in range(args.n_eval):
+                row.append(gen_seq[s][t][i]) 
+            to_plot.append(row)#append: the best predict result + 4 random samples
+        for t in range(args.n_eval):
+            row = []
+            row.append(gt_seq[t][i])
+            for ss in range(len(s_list)):
+                s = s_list[ss]
+                row.append(gen_seq[s][t][i])
+            gifs[t].append(row)#row: (ground truth, best_predict, sample, sample, sample, sample)
+
+    #fname = '%s/gen/sample_%d.png' % (args.log_dir, epoch) 
+    #save_tensors_image(fname, to_plot)
+
+    pred_fname = '%s/gen/sample_%d_pred.gif' % (args.log_dir, epoch) 
+    gt_fname = '%s/gen/sample_%d_gt.gif' % (args.log_dir, epoch) 
+    save_gif(pred_fname, gt_fname, gifs)
 
 def save_tensors_image(filename, inputs, padding=1):
+    print(len(inputs))
+    print(len(inputs[0]))
+    print(inputs[0][0].shape)
     images = image_tensor(inputs, padding)
     return save_image(filename, images)
 
@@ -196,8 +275,8 @@ def plot_rec(validate_seq, validate_cond, modules, epoch, args ):#validate_seq, 
     gen_seq.append(validate_seq[0])
     x_in = validate_seq[0]
     for i in range(1, args.n_past+args.n_future):
-        h = modules['encoder'](validate_seq[i-1])
-        h_target = modules['encoder'](validate_seq[i])
+        h = modules['encoder'](validate_seq[i-1],validate_cond[i-1])
+        h_target = modules['encoder'](validate_seq[i],validate_cond[i])
         if args.last_frame_skip or i < args.n_past:	
             h, skip = h
         else:
@@ -212,7 +291,7 @@ def plot_rec(validate_seq, validate_cond, modules, epoch, args ):#validate_seq, 
             gen_seq.append(validate_seq[i])
         else:
             h_pred = modules['frame_predictor'](torch.cat([h, z_t], 1))
-            x_pred = modules['decoder']([h_pred, skip]).detach()
+            x_pred = modules['decoder']([h_pred, skip],validate_cond[i]).detach()
             gen_seq.append(x_pred)
    
     to_plot = []
@@ -222,42 +301,77 @@ def plot_rec(validate_seq, validate_cond, modules, epoch, args ):#validate_seq, 
         for t in range(args.n_past+args.n_future):
             row.append(gen_seq[t][i]) 
         to_plot.append(row)
-    fname = '%s/gen/rec_%d.png' % (args.log_dir, epoch) 
-    save_tensors_image(fname, to_plot)
+    #fname = '%s/gen/rec_%d.png' % (args.log_dir, epoch) 
+    #save_tensors_image(fname, to_plot)
 
 
-def save_gif(filename, inputs, duration=0.25):
+def save_gif(pred_fname, gt_fname, inputs, duration=0.25):
+    #inputs shape:(seq, batch, 6, 3, 64, 64)
+
     images = []
+    preds = []
+    for i in range(len(inputs)):
+        img = inputs[i][0][0]
+        pre = inputs[i][0][1]
+        img = img.cpu()
+        pre = pre.cpu()
+        img = img.transpose(0,1).transpose(1,2).clamp(0,1).numpy()
+        pre = pre.transpose(0,1).transpose(1,2).clamp(0,1).numpy()
+        img = img / np.amax(img)
+        pre = pre / np.amax(pre)
+  
+        img = 255*img
+        pre = 255*pre
+
+        img = img.astype(np.uint8)
+        pre = pre.astype(np.uint8)
+
+        images.append(img)
+        preds.append(pre)
+    #imageio.mimsave(gt_fname, images, duration=duration)
+    #images_future = images[-5:]
+        #preds.append(img.numpy().astype('uint8'))
+    
+    t1 = []
+    t2 = []
+    for i in range(len(inputs)):
+        t1.append(np.concatenate([images[i],preds[i]],axis=0))
+        t2.append(np.concatenate([images[i],preds[i]],axis=1))
+    imageio.mimsave(pred_fname, t2, duration=duration)
+    #imageio.mimsave(pred_fname, t1[-5:], duration=duration)
+    
+
+    
+    
+    '''
     for tensor in inputs:
+        img = image_tensor(tensor, padding=0)
+        print(img.shape)
+        print(img)
+        img = img.transpose(0,1).transpose(1,2).clamp(0,1)
+        images.append(img.numpy()*255)
+        exit(1)
+        img = img.cpu()
+        img = img.transpose(0,1).transpose(1,2).clamp(0,1)
+        images.append(img.numpy()*255)
+    imageio.mimsave(gt_fname, images, duration=duration)
+    
+    preds = []
+    for tensor in inputs[0]:
         img = image_tensor(tensor, padding=0)
         img = img.cpu()
         img = img.transpose(0,1).transpose(1,2).clamp(0,1)
-        images.append(img.numpy())
-    imageio.mimsave(filename, images, duration=duration)
-
-def draw_text_tensor(tensor, text):
-    np_x = tensor.transpose(0, 1).transpose(1, 2).data.cpu().numpy()
-    pil = Image.fromarray(np.uint8(np_x*255))
-    draw = ImageDraw.Draw(pil)
-    draw.text((4, 64), text, (0,0,0))
-    img = np.asarray(pil)
-    return Variable(torch.Tensor(img / 255.)).transpose(1, 2).transpose(0, 1)
-
-def save_gif_with_text(filename, inputs, text, duration=0.25):
-    images = []
-    for tensor, text in zip(inputs, text):
-        img = image_tensor([draw_text_tensor(ti, texti) for ti, texti in zip(tensor, text)], padding=0)
-        img = img.cpu()
-        img = img.transpose(0,1).transpose(1,2).clamp(0,1).numpy()
-        images.append(img)
-    imageio.mimsave(filename, images, duration=duration)
-
+        preds.append(img.numpy()*255)
+    imageio.mimsave(pred_fname, preds, duration=duration)
+    '''
+    
+'''
 def plot(validate_seq, validate_cond, modules, epoch, args):
     nsample = 5 
     gen_seq = [[] for i in range(nsample)]
     gt_seq = [validate_seq[i] for i in range(len(validate_seq))]
 
-    h_seq = [modules['encoder'](validate_seq[i]) for i in range(args.n_past)]
+    h_seq = [modules['encoder'](validate_seq[i],validate_cond[i]) for i in range(args.n_past)]
     for s in range(nsample):
         modules['frame_predictor'].hidden = modules['frame_predictor'].init_hidden()
         gen_seq[s].append(validate_seq[0])
@@ -277,7 +391,7 @@ def plot(validate_seq, validate_cond, modules, epoch, args):
             else:
                 z_t = torch.cuda.FloatTensor(args.batch_size, args.z_dim).normal_()
                 h = modules['frame_predictor'](torch.cat([h, z_t], 1)).detach()
-                x_in = modules['decoder']([h, skip]).detach()
+                x_in = modules['decoder']([h, skip],validate_cond[i]).detach()
                 gen_seq[s].append(x_in)
 
     to_plot = []
@@ -307,3 +421,4 @@ def plot(validate_seq, validate_cond, modules, epoch, args):
 
     fname = '%s/gen/sample_%d.gif' % (args.log_dir, epoch) 
     save_gif(fname, gifs)
+'''
