@@ -320,12 +320,11 @@ def save_gif(pred_fname, inputs, duration=0.5):
     #imageio.mimsave(gt_fname, images, duration=duration)
     #images_future = images[-5:]
         #preds.append(img.numpy().astype('uint8'))
-    '''
+    con_gif = []
     for i in range(len(inputs)):
         img = gifs[0][i]
         for j in range(1,num):
             img = np.concatenate([img,gifs[j][i]],axis=1)
         con_gif.append(img)
-    '''
-    gifs = np.concatenate(gifs, axis=0)
-    imageio.mimsave(pred_fname, gifs, duration=duration)
+    
+    imageio.mimsave(pred_fname, con_gif, duration=duration)
