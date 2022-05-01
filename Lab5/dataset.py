@@ -53,7 +53,7 @@ class bair_robot_pushing_dataset(Dataset):
             im = np.asarray(im).reshape(64, 64, 3)
             im = self.to_tensor(im)
             im = im.reshape(1,3,64,64)
-            image_seq.append(im/255.)
+            image_seq.append(im)
         image_seq = np.concatenate(image_seq, axis=0)
         return image_seq
     

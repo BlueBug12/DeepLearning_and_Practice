@@ -23,7 +23,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--lr', default=0.002, type=float, help='learning rate')
     parser.add_argument('--beta1', default=0.9, type=float, help='momentum term for adam')
-    parser.add_argument('--batch_size', default=12, type=int, help='batch size')
+    parser.add_argument('--batch_size', default=32, type=int, help='batch size')
     parser.add_argument('--log_dir', default='./logs/fp', help='base directory to save logs')
     parser.add_argument('--model_dir', default='', help='base directory to save logs')
     parser.add_argument('--data_root', default='./data', help='root directory for data')
@@ -81,14 +81,8 @@ def train(x, cond, modules, optimizer, kl_anneal, args):
         _, mu_p, logvar_p = modules['prior'](h)
         h_pred = modules['frame_predictor'](torch.cat([h, z_t], 1))
         x_pred = modules['decoder']([h_pred, skip],cond[i])
-        #print(type(x_pred))
-        #print(x_pred.shape)
-        #print(type(x[i]))
-        #print(x[i].shape)
-        #exit(1)
         mse += mse_criterion(x_pred, x[i])
         kld += kl_criterion(mu, logvar, mu_p, logvar_p,args)
-        #print("test")
 
     #beta = kl_anneal.get_beta()
     beta = 0.87
@@ -313,8 +307,8 @@ def main():
             train_record.write(('[epoch: %02d] loss: %.5f | mse loss: %.5f | kld loss: %.5f\n' % (epoch, epoch_loss  / args.epoch_size, epoch_mse / args.epoch_size, epoch_kld / args.epoch_size)))
         
         frame_predictor.eval()
-        encoder.eval()
-        decoder.eval()
+        #encoder.eval()
+        #decoder.eval()
         prior.eval()
         posterior.eval()
 
@@ -350,7 +344,7 @@ def main():
                     'last_epoch': epoch},
                     '%s/model.pth' % args.log_dir)
 
-        if epoch % 2 == 0:
+        if epoch % 10 == 0:
             try:
                 validate_seq, validate_cond = next(validate_iter)
             except StopIteration:
@@ -358,7 +352,7 @@ def main():
                 validate_seq, validate_cond = next(validate_iter)
 
             plot_pred(validate_seq, validate_cond, modules, epoch, args)
-            plot_rec(validate_seq, validate_cond, modules, epoch, args)
+            #plot_rec(validate_seq, validate_cond, modules, epoch, args)
 
 if __name__ == '__main__':
     main()
