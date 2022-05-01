@@ -31,9 +31,9 @@ def parse_args():
     parser.add_argument('--niter', type=int, default=300, help='number of epochs to train for')
     parser.add_argument('--epoch_size', type=int, default=600, help='epoch size')
     parser.add_argument('--tfr', type=float, default=1.0, help='teacher forcing ratio (0 ~ 1)')
-    parser.add_argument('--tfr_start_decay_epoch', type=int, default=50, help='The epoch that teacher forcing ratio become decreasing')
+    parser.add_argument('--tfr_start_decay_epoch', type=int, default=200, help='The epoch that teacher forcing ratio become decreasing')
     parser.add_argument('--tfr_decay_step', type=float, default=0.1, help='The decay step size of teacher forcing ratio (0 ~ 1)')
-    parser.add_argument('--tfr_lower_bound', type=float, default=0.1, help='The lower bound of teacher forcing ratio for scheduling teacher forcing ratio (0 ~ 1)')
+    parser.add_argument('--tfr_lower_bound', type=float, default=0.3, help='The lower bound of teacher forcing ratio for scheduling teacher forcing ratio (0 ~ 1)')
     parser.add_argument('--kl_anneal_cyclical', default=False, action='store_true', help='use cyclical mode')
     parser.add_argument('--kl_anneal_ratio', type=float, default=2, help='The decay ratio of kl annealing')
     parser.add_argument('--kl_anneal_cycle', type=int, default=3, help='The number of cycle for kl annealing (if use cyclical mode)')
@@ -54,7 +54,7 @@ def parse_args():
     args = parser.parse_args()
     return args
 
-def train(x, cond, modules, optimizer, kl_anneal, args):
+def train(x, cond, modules, optimizer, kl_anneal, args, epoch):
     modules['frame_predictor'].zero_grad()
     modules['posterior'].zero_grad()
     modules['prior'].zero_grad()
@@ -70,23 +70,40 @@ def train(x, cond, modules, optimizer, kl_anneal, args):
     mse = 0
     kld = 0
     use_teacher_forcing = True if random.random() < args.tfr else False
+    pred = []
     for i in range(1, args.n_past + args.n_future):
-        h = modules['encoder'](x[i-1],cond[i-1])
-        h_target = modules['encoder'](x[i],cond[i])[0]
+        if i-1 < args.n_past or use_teacher_forcing:
+            h = modules['encoder'](x[i-1],cond[i-1])
+        else:
+            h = modules['encoder'](pred[i-1-args.n_past],cond[i-1])
+
+        if i < args.n_past or use_teacher_forcing:
+            h_target = modules['encoder'](x[i],cond[i])[0]
+        else:
+            h_target = modules['encoder'](pred[i-args.n_past],cond[i])[0]
+
         if args.last_frame_skip or i < args.n_past:        
             h, skip = h
         else:
             h = h[0]
-        z_t, mu, logvar = modules['posterior'](h_target)#gaussian_lstm
-        #_, mu_p, logvar_p = modules['prior'](h)#gaussian_lstm
-        h_pred = modules['frame_predictor'](torch.cat([h, z_t], 1))#lstm
-        x_pred = modules['decoder']([h_pred, skip],cond[i])
-        mse += mse_criterion(x_pred, x[i])
-        kld += kl_criterion(mu, logvar,args)
-        #kld += kl_criterion(mu, logvar, mu_p, logvar_p,args)
 
-    #beta = kl_anneal.get_beta()
-    beta = 0.87
+        if i < args.n_past or use_teacher_forcing:
+            z_t, mu, logvar = modules['posterior'](h_target)#gaussian_lstm
+            h_pred = modules['frame_predictor'](torch.cat([h, z_t], 1))#lstm
+            x_pred = modules['decoder']([h_pred, skip],cond[i])
+            mse += mse_criterion(x_pred, x[i])
+            kld += kl_criterion(mu, logvar,args)
+            pred = [x_pred]
+        else:
+            z_t = torch.from_numpy(np.random.normal(0,1,size=(args.batch_size,64))).float().to('cuda')
+            h_pred = modules['frame_predictor'](torch.cat([h, z_t], 1))#lstm
+            x_pred = modules['decoder']([h_pred, skip],cond[i])
+            mse += mse_criterion(x_pred, x[i])
+            pred.append(x_pred)
+            
+
+
+    beta = kl_anneal.get_beta(epoch)
     loss = mse + kld * beta
     #print(kld)
     #loss.backward(retain_graph=True)
@@ -128,16 +145,27 @@ def pred(validate_seq, validate_cond, modules, args, device):
 class kl_annealing():
     def __init__(self, args):
         super().__init__()
-        pass
-        #raise NotImplementedError
+        self.cyclical_flag = args.kl_anneal_cyclical
+        self.ratio = args.kl_anneal_ratio
+        self.cycle = args.kl_anneal_cycle
+        self.period = args.epoch_size // self.cycle
+        self.thres = args.epoch_size // 10
+        self.slope = 1.0 / self.thres
+        self.c_slope = 1.0 / (self.period // 2)
     
     def update(self):
         pass
         #raise NotImplementedError
     
-    def get_beta(self):
-        pass
-        #raise NotImplementedError
+    def get_beta(self,epoch):
+        if self.cyclical_flag:
+            epoch %= self.period
+            return min(self.c_slope*epoch, 1.0)
+        else:
+            return min(self.slope*epoch, 1.0)
+
+
+
 
 def sequence_input(seq, dtype):
     return [Variable(x.type(dtype)) for x in seq]
@@ -296,7 +324,7 @@ def main():
                 train_iter = get_batch(train_loader)
                 seq, cond = next(train_iter)
 
-            loss, mse, kld = train(seq, cond, modules, optimizer, kl_anneal, args)
+            loss, mse, kld = train(seq, cond, modules, optimizer, kl_anneal, args,epoch)
             epoch_loss += loss
             epoch_mse += mse
             epoch_kld += kld
