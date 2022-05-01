@@ -31,9 +31,9 @@ def parse_args():
     parser.add_argument('--niter', type=int, default=300, help='number of epochs to train for')
     parser.add_argument('--epoch_size', type=int, default=600, help='epoch size')
     parser.add_argument('--tfr', type=float, default=1.0, help='teacher forcing ratio (0 ~ 1)')
-    parser.add_argument('--tfr_start_decay_epoch', type=int, default=0, help='The epoch that teacher forcing ratio become decreasing')
-    parser.add_argument('--tfr_decay_step', type=float, default=0, help='The decay step size of teacher forcing ratio (0 ~ 1)')
-    parser.add_argument('--tfr_lower_bound', type=float, default=0, help='The lower bound of teacher forcing ratio for scheduling teacher forcing ratio (0 ~ 1)')
+    parser.add_argument('--tfr_start_decay_epoch', type=int, default=50, help='The epoch that teacher forcing ratio become decreasing')
+    parser.add_argument('--tfr_decay_step', type=float, default=0.1, help='The decay step size of teacher forcing ratio (0 ~ 1)')
+    parser.add_argument('--tfr_lower_bound', type=float, default=0.1, help='The lower bound of teacher forcing ratio for scheduling teacher forcing ratio (0 ~ 1)')
     parser.add_argument('--kl_anneal_cyclical', default=False, action='store_true', help='use cyclical mode')
     parser.add_argument('--kl_anneal_ratio', type=float, default=2, help='The decay ratio of kl annealing')
     parser.add_argument('--kl_anneal_cycle', type=int, default=3, help='The number of cycle for kl annealing (if use cyclical mode)')
@@ -77,17 +77,20 @@ def train(x, cond, modules, optimizer, kl_anneal, args):
             h, skip = h
         else:
             h = h[0]
-        z_t, mu, logvar = modules['posterior'](h_target)
-        _, mu_p, logvar_p = modules['prior'](h)
-        h_pred = modules['frame_predictor'](torch.cat([h, z_t], 1))
+        z_t, mu, logvar = modules['posterior'](h_target)#gaussian_lstm
+        #_, mu_p, logvar_p = modules['prior'](h)#gaussian_lstm
+        h_pred = modules['frame_predictor'](torch.cat([h, z_t], 1))#lstm
         x_pred = modules['decoder']([h_pred, skip],cond[i])
         mse += mse_criterion(x_pred, x[i])
-        kld += kl_criterion(mu, logvar, mu_p, logvar_p,args)
+        kld += kl_criterion(mu, logvar,args)
+        #kld += kl_criterion(mu, logvar, mu_p, logvar_p,args)
 
     #beta = kl_anneal.get_beta()
     beta = 0.87
     loss = mse + kld * beta
-    loss.backward(retain_graph=True)
+    #print(kld)
+    #loss.backward(retain_graph=True)
+    loss.backward()
 
     optimizer.step()
 
@@ -112,14 +115,14 @@ def pred(validate_seq, validate_cond, modules, args, device):
             else:
                 h = h[0]
             z_t, mu, logvar = modules['posterior'](h_target)
-            _, mu_p, logvar_p = modules['prior'](h)
+            #_, mu_p, logvar_p = modules['prior'](h)
             h_pred = modules['frame_predictor'](torch.cat([h, z_t], 1))
             x_pred = modules['decoder']([h_pred, skip],validate_cond[i])
             img_seq.append(x_pred)
             mse += mse_criterion(x_pred, validate_seq[i])
-            kld += kl_criterion(mu, logvar, mu_p, logvar_p,args)
-    #print(len(img_seq))
-    #print(img_seq[0].shape)
+            kld += kl_criterion(mu, logvar, args)
+            #kld += kl_criterion(mu, logvar, mu_p, logvar_p,args)
+
     return img_seq
 
 class kl_annealing():
@@ -299,8 +302,7 @@ def main():
             epoch_kld += kld
         
         if epoch >= args.tfr_start_decay_epoch:
-            ### Update teacher forcing ratio ###
-            pass
+            args.tfr = max(args.tfr - args.tfr_decay_step,args.tfr_lower_bound)
 
         progress.update(1)
         with open('./{}/train_record.txt'.format(args.log_dir), 'a') as train_record:

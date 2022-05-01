@@ -11,7 +11,7 @@ from skimage.metrics import structural_similarity as ssim_metric
 from torch.autograd import Variable
 from torchvision import transforms
 from torchvision.utils import save_image
-
+'''
 def kl_criterion(mu1, logvar1, mu2, logvar2,args):
     # KL( N(mu_1, sigma2_1) || N(mu_2, sigma2_2)) = 
     #   log( sqrt(
@@ -27,7 +27,7 @@ def kl_criterion(mu, logvar, args):
   KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
   KLD /= args.batch_size  
   return KLD
-'''
+
 
     
 def eval_seq(gt, pred):

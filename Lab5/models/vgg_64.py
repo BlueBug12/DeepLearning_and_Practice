@@ -49,7 +49,8 @@ class vgg_encoder(nn.Module):
 
     def forward(self, input,cond):
         '''
-        ]h1: torch.Size([10, 64, 64, 64])
+        h0: torch.Size([10, 3, 64, 64])
+        h1: torch.Size([10, 64, 64, 64])
         h2: torch.Size([10, 128, 32, 32])
         h3: torch.Size([10, 256, 16, 16])
         h4: torch.Size([10, 512, 8, 8])
@@ -63,7 +64,7 @@ class vgg_encoder(nn.Module):
         h5 = self.c5(self.mp(h4)) # 4 -> 1
         h6 = h5.view(-1, self.dim)
         
-        return h5.view(-1, self.dim), [h1, h2, h3, h4]
+        return h6, [h1, h2, h3, h4]
 
 
 class vgg_decoder(nn.Module):
