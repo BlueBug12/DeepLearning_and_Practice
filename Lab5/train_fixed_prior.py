@@ -54,7 +54,7 @@ def parse_args():
     args = parser.parse_args()
     return args
 
-def train(x, cond, modules, optimizer, kl_anneal, args, epoch):
+def train(x, cond, modules, optimizer, kl_anneal, args, epoch,device):
     modules['frame_predictor'].zero_grad()
     modules['posterior'].zero_grad()
     modules['prior'].zero_grad()
@@ -89,14 +89,14 @@ def train(x, cond, modules, optimizer, kl_anneal, args, epoch):
 
         if i < args.n_past or use_teacher_forcing:
             z_t, mu, logvar = modules['posterior'](h_target)#gaussian_lstm
-            h_pred = modules['frame_predictor'](torch.cat([h, z_t], 1))#lstm
+            h_pred = modules['frame_predictor'](torch.cat([h, z_t, cond[i]], 1))#lstm
             x_pred = modules['decoder']([h_pred, skip],cond[i])
             mse += mse_criterion(x_pred, x[i])
             kld += kl_criterion(mu, logvar,args)
             pred = [x_pred]
         else:
-            z_t = torch.from_numpy(np.random.normal(0,1,size=(args.batch_size,64))).float().to('cuda')
-            h_pred = modules['frame_predictor'](torch.cat([h, z_t], 1))#lstm
+            z_t = torch.from_numpy(np.random.normal(0,1,size=(args.batch_size,64))).float().to(device)
+            h_pred = modules['frame_predictor'](torch.cat([h, z_t, cond[i]], 1))#lstm
             x_pred = modules['decoder']([h_pred, skip],cond[i])
             mse += mse_criterion(x_pred, x[i])
             pred.append(x_pred)
@@ -114,6 +114,49 @@ def train(x, cond, modules, optimizer, kl_anneal, args, epoch):
     return loss.detach().cpu().numpy() / (args.n_past + args.n_future), mse.detach().cpu().numpy() / (args.n_past + args.n_future), kld.detach().cpu().numpy() / (args.n_future + args.n_past)
 
 def pred(validate_seq, validate_cond, modules, args, device):
+    modules['frame_predictor'].eval()
+    modules['posterior'].eval()
+    modules['prior'].eval()
+    modules['encoder'].eval()
+    modules['decoder'].eval()
+    mse_criterion = nn.MSELoss()
+    
+    mse = 0
+    kld = 0
+    img_seq = validate_seq[:args.n_past]
+    with torch.no_grad():
+        for i in range(1, args.n_past + args.n_future):
+            if i-1 < args.n_past:
+                h = modules['encoder'](validate_seq[i-1],validate_cond[i-1])
+            else:
+                h = modules['encoder'](img_seq[i-1-args.n_past],validate_cond[i-1])
+
+            if i < args.n_past:
+                h_target = modules['encoder'](validate_seq[i],validate_cond[i])[0]
+            else:
+                h_target = modules['encoder'](img_seq[i-args.n_past],validate_cond[i])[0]
+
+            if args.last_frame_skip or i < args.n_past:        
+                h, skip = h
+            else:
+                h = h[0]
+
+            if i < args.n_past:
+                z_t, mu, logvar = modules['posterior'](h_target)#gaussian_lstm
+                h_pred = modules['frame_predictor'](torch.cat([h, z_t, validate_cond[i]], 1))#lstm
+                x_pred = modules['decoder']([h_pred, skip],validate_cond[i])
+                #mse += mse_criterion(x_pred, validate_seq[i])
+                #kld += kl_criterion(mu, logvar,args)
+            
+            else:
+                z_t = torch.from_numpy(np.random.normal(0,1,size=(args.batch_size,64))).float().to(device)
+                h_pred = modules['frame_predictor'](torch.cat([h, z_t, validate_cond[i]], 1))#lstm
+                x_pred = modules['decoder']([h_pred, skip],validate_cond[i])
+                #mse += mse_criterion(x_pred, validate_seq[i])
+                img_seq.append(x_pred)
+    '''
+    
+    
     modules['frame_predictor'].eval()
     modules['posterior'].eval()
     modules['prior'].eval()
@@ -139,7 +182,7 @@ def pred(validate_seq, validate_cond, modules, args, device):
             mse += mse_criterion(x_pred, validate_seq[i])
             kld += kl_criterion(mu, logvar, args)
             #kld += kl_criterion(mu, logvar, mu_p, logvar_p,args)
-
+    '''
     return img_seq
 
 class kl_annealing():
@@ -179,14 +222,15 @@ def get_batch(data_loader):
 
 def main():
     args = parse_args()
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     if args.cuda:
         assert torch.cuda.is_available(), 'CUDA is not available.'
-        device = 'cuda'
+        device = torch.device('cuda')
         print("Training with GPU...")
     else:
-        device = 'cpu'
+        device = torch.device('cpu')
         print("Training with CPU...")
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    
     
     assert args.n_past + args.n_future <= 30 and args.n_eval <= 30
     assert 0 <= args.tfr and args.tfr <= 1
@@ -205,9 +249,9 @@ def main():
         args.log_dir = '%s/continued' % args.log_dir
         start_epoch = saved_model['last_epoch']
     else:
-        name = 'rnn_size=%d-predictor-posterior-rnn_layers=%d-%d-n_past=%d-n_future=%d-lr=%.4f-g_dim=%d-z_dim=%d-last_frame_skip=%s-beta=%.7f'\
-            % (args.rnn_size, args.predictor_rnn_layers, args.posterior_rnn_layers, args.n_past, args.n_future, args.lr, args.g_dim, args.z_dim, args.last_frame_skip, args.beta)
-
+        #name = 'rnn_size=%d-predictor-posterior-rnn_layers=%d-%d-n_past=%d-n_future=%d-lr=%.4f-g_dim=%d-z_dim=%d-last_frame_skip=%s-beta=%.7f'\
+        #    % (args.rnn_size, args.predictor_rnn_layers, args.posterior_rnn_layers, args.n_past, args.n_future, args.lr, args.g_dim, args.z_dim, args.last_frame_skip, args.beta)
+        name = "cVAE"
         args.log_dir = '%s/%s' % (args.log_dir, name)
         niter = args.niter
         start_epoch = 0
@@ -236,7 +280,7 @@ def main():
         posterior = saved_model['posterior']
         prior = saved_model['prior']
     else:
-        frame_predictor = lstm(args.g_dim+args.z_dim, args.g_dim, args.rnn_size, args.predictor_rnn_layers, args.batch_size, device)
+        frame_predictor = lstm(args.g_dim+args.z_dim+7, args.g_dim, args.rnn_size, args.predictor_rnn_layers, args.batch_size, device)
         posterior = gaussian_lstm(args.g_dim, args.z_dim, args.rnn_size, args.posterior_rnn_layers, args.batch_size, device)
         prior = gaussian_lstm(args.g_dim, args.z_dim, args.rnn_size, args.posterior_rnn_layers, args.batch_size, device)
         frame_predictor.apply(init_weights)
@@ -324,7 +368,7 @@ def main():
                 train_iter = get_batch(train_loader)
                 seq, cond = next(train_iter)
 
-            loss, mse, kld = train(seq, cond, modules, optimizer, kl_anneal, args,epoch)
+            loss, mse, kld = train(seq, cond, modules, optimizer, kl_anneal, args,epoch,device)
             epoch_loss += loss
             epoch_mse += mse
             epoch_kld += kld

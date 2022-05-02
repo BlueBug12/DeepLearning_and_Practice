@@ -5,6 +5,10 @@ from torch.autograd import Variable
 class lstm(nn.Module):
     def __init__(self, input_size, output_size, hidden_size, n_layers, batch_size, device):
         super(lstm, self).__init__()
+        #print(f"input_size:{input_size}")
+        #print(f"output_size:{output_size}")
+        #print(f"hidden_size:{hidden_size}")
+
         self.device = device
         self.input_size = input_size
         self.output_size = output_size
@@ -29,9 +33,15 @@ class lstm(nn.Module):
     def forward(self, input):
         embedded = self.embed(input)
         h_in = embedded
+        
+        
         for i in range(self.n_layers):
+            #print(len(self.hidden[i]))
+            #print(h_in.shape,self.hidden[i][0].shape,self.hidden[i][1].shape)
             self.hidden[i] = self.lstm[i](h_in, self.hidden[i])
             h_in = self.hidden[i][0]
+        #print(h_in.shape)
+        #print("here?")
 
         return self.output(h_in)
 
@@ -64,6 +74,7 @@ class gaussian_lstm(nn.Module):
 
     def forward(self, input):
         embedded = self.embed(input)
+        
         h_in = embedded
         for i in range(self.n_layers):
             self.hidden[i] = self.lstm[i](h_in, self.hidden[i])

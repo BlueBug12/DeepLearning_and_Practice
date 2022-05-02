@@ -183,14 +183,25 @@ def image_tensor(inputs, padding=1):
 
 def plot_pred(validate_seq, validate_cond, modules, epoch, args):
     #shape of validate_seq: ((n_past+n_future) x batch_size x 3 x 64 x 64)
+    modules['frame_predictor'].eval()
+    modules['posterior'].eval()
+    modules['prior'].eval()
+    modules['encoder'].eval()
+    modules['decoder'].eval()
     nsample = 20 
     gen_seq = [[] for i in range(nsample)]
     gt_seq = [validate_seq[i] for i in range(len(validate_seq))]
 
     for s in range(nsample):
-        modules['frame_predictor'].hidden = modules['frame_predictor'].init_hidden()
-        modules['prior'].hidden = modules['prior'].init_hidden()
-        modules['posterior'].hidden = modules['posterior'].init_hidden()
+        #modules['frame_predictor'].hidden = modules['frame_predictor'].init_hidden()
+        #modules['prior'].hidden = modules['prior'].init_hidden()
+        #modules['posterior'].hidden = modules['posterior'].init_hidden()
+        modules['frame_predictor'].eval()
+        modules['posterior'].eval()
+        modules['prior'].eval()
+        modules['encoder'].eval()
+        modules['decoder'].eval()
+        
         gen_seq[s].append(validate_seq[0])
         x_in = validate_seq[0]
         for i in range(1, args.n_eval):
@@ -205,12 +216,12 @@ def plot_pred(validate_seq, validate_cond, modules, epoch, args):
                 h_target = h_target[0].detach()
                 z_t, _, _ = modules['posterior'](h_target)
                 #prior(h)
-                modules['frame_predictor'](torch.cat([h, z_t], 1))
+                modules['frame_predictor'](torch.cat([h, z_t,validate_cond[i]], 1))
                 x_in = validate_seq[i]
                 gen_seq[s].append(x_in)
             else:
                 z_t, _, _ = modules['prior'](h)
-                h = modules['frame_predictor'](torch.cat([h, z_t], 1)).detach()
+                h = modules['frame_predictor'](torch.cat([h, z_t,validate_cond[i]], 1)).detach()
                 x_in = modules['decoder']([h, skip],validate_cond[i]).detach()
                 gen_seq[s].append(x_in)
 
