@@ -16,7 +16,7 @@ class bair_robot_pushing_dataset(Dataset):
         assert mode == 'train' or mode == 'test' or mode == 'validate'
         if mode == 'train':
             self.data_dir = os.path.join(args.data_root,"processed_data","train")
-            self.ordered = True
+            self.ordered = False
         elif mode == 'test':
             self.data_dir = os.path.join(args.data_root,"processed_data","test")
             self.ordered = True
