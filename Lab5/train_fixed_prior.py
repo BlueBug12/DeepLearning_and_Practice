@@ -1,8 +1,7 @@
 import argparse
-import itertools
 import os
 import random
-
+import imageio
 import numpy as np
 import torch
 import torch.nn as nn
@@ -11,11 +10,11 @@ import torch.optim as optim
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-
+import pickle
 from dataset import bair_robot_pushing_dataset
 from models.lstm import gaussian_lstm, lstm
 from models.vgg_64 import vgg_decoder, vgg_encoder
-from utils import init_weights, kl_criterion, plot_pred, plot_rec, finn_eval_seq
+from utils import init_weights, kl_criterion, plot_pred, finn_eval_seq, tensor_to_img
 
 torch.backends.cudnn.benchmark = True
 
@@ -32,8 +31,8 @@ def parse_args():
     parser.add_argument('--epoch_size', type=int, default=600, help='epoch size')
     parser.add_argument('--tfr', type=float, default=1.0, help='teacher forcing ratio (0 ~ 1)')
     parser.add_argument('--tfr_start_decay_epoch', type=int, default=200, help='The epoch that teacher forcing ratio become decreasing')
-    parser.add_argument('--tfr_decay_step', type=float, default=0.1, help='The decay step size of teacher forcing ratio (0 ~ 1)')
-    parser.add_argument('--tfr_lower_bound', type=float, default=0.3, help='The lower bound of teacher forcing ratio for scheduling teacher forcing ratio (0 ~ 1)')
+    parser.add_argument('--tfr_decay_step', type=float, default=0, help='The decay step size of teacher forcing ratio (0 ~ 1)')
+    parser.add_argument('--tfr_lower_bound', type=float, default=0.8, help='The lower bound of teacher forcing ratio for scheduling teacher forcing ratio (0 ~ 1)')
     parser.add_argument('--kl_anneal_cyclical', default=False, action='store_true', help='use cyclical mode')
     parser.add_argument('--kl_anneal_ratio', type=float, default=2, help='The decay ratio of kl annealing')
     parser.add_argument('--kl_anneal_cycle', type=int, default=3, help='The number of cycle for kl annealing (if use cyclical mode)')
@@ -70,17 +69,17 @@ def train(x, cond, modules, optimizer, kl_anneal, args, epoch,device):
     mse = 0
     kld = 0
     use_teacher_forcing = True if random.random() < args.tfr else False
-    pred = []
+    pred = x[:args.n_past]
     for i in range(1, args.n_past + args.n_future):
         if i-1 < args.n_past or use_teacher_forcing:
             h = modules['encoder'](x[i-1],cond[i-1])
         else:
-            h = modules['encoder'](pred[i-1-args.n_past],cond[i-1])
+            h = modules['encoder'](pred[i-1],cond[i-1])
 
         if i < args.n_past or use_teacher_forcing:
             h_target = modules['encoder'](x[i],cond[i])[0]
-        else:
-            h_target = modules['encoder'](pred[i-args.n_past],cond[i])[0]
+        #else:
+        #    h_target = modules['encoder'](pred[i-args.n_past],cond[i])[0]
 
         if args.last_frame_skip or i < args.n_past:        
             h, skip = h
@@ -93,7 +92,6 @@ def train(x, cond, modules, optimizer, kl_anneal, args, epoch,device):
             x_pred = modules['decoder']([h_pred, skip],cond[i])
             mse += mse_criterion(x_pred, x[i])
             kld += kl_criterion(mu, logvar,args)
-            pred = [x_pred]
         else:
             z_t = torch.from_numpy(np.random.normal(0,1,size=(args.batch_size,64))).float().to(device)
             h_pred = modules['frame_predictor'](torch.cat([h, z_t, cond[i]], 1))#lstm
@@ -105,7 +103,6 @@ def train(x, cond, modules, optimizer, kl_anneal, args, epoch,device):
 
     beta = kl_anneal.get_beta(epoch)
     loss = mse + kld * beta
-    #print(kld)
     #loss.backward(retain_graph=True)
     loss.backward()
 
@@ -129,12 +126,10 @@ def pred(validate_seq, validate_cond, modules, args, device):
             if i-1 < args.n_past:
                 h = modules['encoder'](validate_seq[i-1],validate_cond[i-1])
             else:
-                h = modules['encoder'](img_seq[i-1-args.n_past],validate_cond[i-1])
+                h = modules['encoder'](img_seq[i-1],validate_cond[i-1])
 
             if i < args.n_past:
                 h_target = modules['encoder'](validate_seq[i],validate_cond[i])[0]
-            else:
-                h_target = modules['encoder'](img_seq[i-args.n_past],validate_cond[i])[0]
 
             if args.last_frame_skip or i < args.n_past:        
                 h, skip = h
@@ -251,7 +246,7 @@ def main():
     else:
         #name = 'rnn_size=%d-predictor-posterior-rnn_layers=%d-%d-n_past=%d-n_future=%d-lr=%.4f-g_dim=%d-z_dim=%d-last_frame_skip=%s-beta=%.7f'\
         #    % (args.rnn_size, args.predictor_rnn_layers, args.posterior_rnn_layers, args.n_past, args.n_future, args.lr, args.g_dim, args.z_dim, args.last_frame_skip, args.beta)
-        name = "cVAE"
+        name = "cVAE_always_tf"
         args.log_dir = '%s/%s' % (args.log_dir, name)
         niter = args.niter
         start_epoch = 0
@@ -346,6 +341,24 @@ def main():
         'decoder': decoder,
         'prior':prior,
     }
+
+    epoch_list = []
+    kld_list = []
+    mse_list = []
+    beta_list = []
+    tf_ratio_list = []
+    loss_list = []
+    psnr_list = []
+
+    record = {
+        'epoch': epoch_list,
+        'kld': kld_list,
+        'mse': mse_list,
+        'beta': beta_list,
+        'tf_ratio': tf_ratio_list,
+        'loss': loss_list,
+        'psnr': psnr_list
+    }
     # --------- training loop ------------------------------------
 
     progress = tqdm(total=args.niter)
@@ -372,7 +385,14 @@ def main():
             epoch_loss += loss
             epoch_mse += mse
             epoch_kld += kld
-        
+
+        record['epoch'].append(epoch)
+        record['kld'].append(epoch_kld)
+        record['mse'].append(epoch_mse)
+        record['beta'].append(kl_anneal.get_beta(epoch))
+        record['tf_ratio'].append(args.tfr)
+        record['loss'].append(epoch_loss)
+
         if epoch >= args.tfr_start_decay_epoch:
             args.tfr = max(args.tfr - args.tfr_decay_step,args.tfr_lower_bound)
 
@@ -381,43 +401,43 @@ def main():
             train_record.write(('[epoch: %02d] loss: %.5f | mse loss: %.5f | kld loss: %.5f\n' % (epoch, epoch_loss  / args.epoch_size, epoch_mse / args.epoch_size, epoch_kld / args.epoch_size)))
         
         frame_predictor.eval()
-        #encoder.eval()
-        #decoder.eval()
+        encoder.eval()
+        decoder.eval()
         prior.eval()
         posterior.eval()
+        ave_psnr = 0
+        #if epoch % 5 == 0:
+        psnr_list = []
+        for _ in range(len(validate_data) // args.batch_size):
+            try:
+                validate_seq, validate_cond = next(validate_iter)
+            except StopIteration:
+                validate_iter = get_batch(train_loader)
+                validate_seq, validate_cond = next(validate_iter)
 
-        if epoch % 5 == 0:
-            psnr_list = []
-            for _ in range(len(validate_data) // args.batch_size):
-                try:
-                    validate_seq, validate_cond = next(validate_iter)
-                except StopIteration:
-                    validate_iter = get_batch(train_loader)
-                    validate_seq, validate_cond = next(validate_iter)
-
-                pred_seq = pred(validate_seq, validate_cond, modules, args, device)
-                _, _, psnr = finn_eval_seq(validate_seq[args.n_past:], pred_seq[args.n_past-1:])
-                psnr_list.append(psnr)
-                
-            ave_psnr = np.mean(np.concatenate(psnr))
+            pred_seq = pred(validate_seq, validate_cond, modules, args, device)
+            _, _, psnr = finn_eval_seq(validate_seq[args.n_past:], pred_seq[args.n_past-1:])
+            psnr_list.append(psnr)
+            
+        ave_psnr = np.mean(np.concatenate(psnr))
 
 
-            with open('./{}/train_record.txt'.format(args.log_dir), 'a') as train_record:
-                train_record.write(('====================== validate psnr = {:.5f} ========================\n'.format(ave_psnr)))
+        with open('./{}/train_record.txt'.format(args.log_dir), 'a') as train_record:
+            train_record.write(('====================== validate psnr = {:.5f} ========================\n'.format(ave_psnr)))
 
-            if ave_psnr > best_val_psnr:
-                best_val_psnr = ave_psnr
-                # save the model
-                torch.save({
-                    'encoder': encoder,
-                    'decoder': decoder,
-                    'frame_predictor': frame_predictor,
-                    'posterior': posterior,
-                    'prior': prior,
-                    'args': args,
-                    'last_epoch': epoch},
-                    '%s/model.pth' % args.log_dir)
-
+        if ave_psnr > best_val_psnr:
+            best_val_psnr = ave_psnr
+            # save the model
+            torch.save({
+                'encoder': encoder,
+                'decoder': decoder,
+                'frame_predictor': frame_predictor,
+                'posterior': posterior,
+                'prior': prior,
+                'args': args,
+                'last_epoch': epoch},
+                '%s/model.pth' % args.log_dir)
+        record['psnr'].append(ave_psnr)
         if epoch % 10 == 0:
             try:
                 validate_seq, validate_cond = next(validate_iter)
@@ -426,8 +446,16 @@ def main():
                 validate_seq, validate_cond = next(validate_iter)
 
             plot_pred(validate_seq, validate_cond, modules, epoch, args)
-            #plot_rec(validate_seq, validate_cond, modules, epoch, args)
+            fname = '%s/gen/pred_%d.gif' % (args.log_dir, epoch)
+            img_seq = pred(validate_seq, validate_cond, modules, args, device)
+            gif = []
+            for img in img_seq:
+                gif.append(tensor_to_img(img[0]))
+            
+            imageio.mimsave(fname,gif,duration=0.5)
 
+        with open(os.path.join(args.log_dir,"record.pickle"),'wb') as f:
+            pickle.dump(record,f)
 if __name__ == '__main__':
     main()
         
