@@ -22,7 +22,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--lr', default=0.002, type=float, help='learning rate')
     parser.add_argument('--beta1', default=0.9, type=float, help='momentum term for adam')
-    parser.add_argument('--batch_size', default=32, type=int, help='batch size')
+    parser.add_argument('--batch_size', default=16, type=int, help='batch size')
     parser.add_argument('--log_dir', default='./logs/fp', help='base directory to save logs')
     parser.add_argument('--model_dir', default='', help='base directory to save logs')
     parser.add_argument('--data_root', default='./data', help='root directory for data')
@@ -37,9 +37,9 @@ def parse_args():
     parser.add_argument('--kl_anneal_ratio', type=float, default=2, help='The decay ratio of kl annealing')
     parser.add_argument('--kl_anneal_cycle', type=int, default=3, help='The number of cycle for kl annealing (if use cyclical mode)')
     parser.add_argument('--seed', default=1, type=int, help='manual seed')
-    parser.add_argument('--n_past', type=int, default=5, help='number of frames to condition on')
-    parser.add_argument('--n_future', type=int, default=5, help='number of frames to predict')
-    parser.add_argument('--n_eval', type=int, default=10, help='number of frames to predict at eval time')
+    parser.add_argument('--n_past', type=int, default=2, help='number of frames to condition on')
+    parser.add_argument('--n_future', type=int, default=10, help='number of frames to predict')
+    parser.add_argument('--n_eval', type=int, default=12, help='number of frames to predict at eval time')
     parser.add_argument('--rnn_size', type=int, default=256, help='dimensionality of hidden layer')
     parser.add_argument('--posterior_rnn_layers', type=int, default=1, help='number of layers')
     parser.add_argument('--predictor_rnn_layers', type=int, default=2, help='number of layers')
@@ -246,7 +246,7 @@ def main():
     else:
         #name = 'rnn_size=%d-predictor-posterior-rnn_layers=%d-%d-n_past=%d-n_future=%d-lr=%.4f-g_dim=%d-z_dim=%d-last_frame_skip=%s-beta=%.7f'\
         #    % (args.rnn_size, args.predictor_rnn_layers, args.posterior_rnn_layers, args.n_past, args.n_future, args.lr, args.g_dim, args.z_dim, args.last_frame_skip, args.beta)
-        name = "cVAE_always_tf"
+        name = "cVAE_past2"
         args.log_dir = '%s/%s' % (args.log_dir, name)
         niter = args.niter
         start_epoch = 0
@@ -387,11 +387,11 @@ def main():
             epoch_kld += kld
 
         record['epoch'].append(epoch)
-        record['kld'].append(epoch_kld)
-        record['mse'].append(epoch_mse)
+        record['kld'].append(epoch_kld/ args.epoch_size)
+        record['mse'].append(epoch_mse/ args.epoch_size)
         record['beta'].append(kl_anneal.get_beta(epoch))
         record['tf_ratio'].append(args.tfr)
-        record['loss'].append(epoch_loss)
+        record['loss'].append(epoch_loss/ args.epoch_size)
 
         if epoch >= args.tfr_start_decay_epoch:
             args.tfr = max(args.tfr - args.tfr_decay_step,args.tfr_lower_bound)
