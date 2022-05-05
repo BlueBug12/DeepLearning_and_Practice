@@ -381,7 +381,7 @@ def main():
             try:
                 validate_seq, validate_cond = next(validate_iter)
             except StopIteration:
-                validate_iter = get_batch(train_loader)
+                validate_iter = get_batch(validate_loader)
                 validate_seq, validate_cond = next(validate_iter)
 
             pred_seq = pred(validate_seq, validate_cond, modules, args, device)
