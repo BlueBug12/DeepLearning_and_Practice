@@ -253,7 +253,7 @@ def main():
             psnr_list.append(np.mean(np.concatenate(psnr)))
             for i in range(args.batch_size):
                 with open('./{}/test_record.txt'.format(args.log_dir), 'a') as test_record:
-                    test_record.write(('====================== test psnr = {:.5f} ========================\n'.format(np.mean(psnr[i]))))
+                    test_record.write(('====================== psnr of image {}= {:.5f} ========================\n'.format(n*args.batch_size+i,np.mean(psnr[i]))))
             
         ave_psnr = np.mean(psnr_list)
         
