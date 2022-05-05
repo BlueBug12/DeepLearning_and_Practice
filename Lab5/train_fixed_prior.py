@@ -22,8 +22,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--lr', default=0.002, type=float, help='learning rate')
     parser.add_argument('--beta1', default=0.9, type=float, help='momentum term for adam')
-    parser.add_argument('--batch_size', default=16, type=int, help='batch size')
-    parser.add_argument('--log_dir', default='./logs/fp', help='base directory to save logs')
+    parser.add_argument('--batch_size', default=32, type=int, help='batch size')
+    parser.add_argument('--log_dir', default='./logs/final', help='base directory to save logs')
     parser.add_argument('--model_dir', default='', help='base directory to save logs')
     parser.add_argument('--data_root', default='./data', help='root directory for data')
     parser.add_argument('--optimizer', default='adam', help='optimizer to train with')
@@ -49,6 +49,8 @@ def parse_args():
     parser.add_argument('--num_workers', type=int, default=32, help='number of data loading threads')
     parser.add_argument('--last_frame_skip', action='store_true', help='if true, skip connections go between frame t and frame t+t rather than last ground truth frame')
     parser.add_argument('--cuda', default=True, action='store_true')  
+    parser.add_argument('--gpu_index', type=str, default="1", help="gpu index number")  
+    parser.add_argument('--name', type=str)
 
     args = parser.parse_args()
     return args
@@ -56,7 +58,7 @@ def parse_args():
 def train(x, cond, modules, optimizer, kl_anneal, args, epoch,device):
     modules['frame_predictor'].zero_grad()
     modules['posterior'].zero_grad()
-    modules['prior'].zero_grad()
+    #modules['prior'].zero_grad()
     modules['encoder'].zero_grad()
     modules['decoder'].zero_grad()
     mse_criterion = nn.MSELoss()
@@ -65,19 +67,19 @@ def train(x, cond, modules, optimizer, kl_anneal, args, epoch,device):
     # initialize the hidden state.
     modules['frame_predictor'].hidden = modules['frame_predictor'].init_hidden()
     modules['posterior'].hidden = modules['posterior'].init_hidden()
-    modules['prior'].hidden = modules['prior'].init_hidden()
+    #modules['prior'].hidden = modules['prior'].init_hidden()
     mse = 0
     kld = 0
     use_teacher_forcing = True if random.random() < args.tfr else False
     pred = x[:args.n_past]
     for i in range(1, args.n_past + args.n_future):
         if i-1 < args.n_past or use_teacher_forcing:
-            h = modules['encoder'](x[i-1],cond[i-1])
+            h = modules['encoder'](x[i-1])
         else:
-            h = modules['encoder'](pred[i-1],cond[i-1])
+            h = modules['encoder'](pred[i-1])
 
         if i < args.n_past or use_teacher_forcing:
-            h_target = modules['encoder'](x[i],cond[i])[0]
+            h_target = modules['encoder'](x[i])[0]
         #else:
         #    h_target = modules['encoder'](pred[i-args.n_past],cond[i])[0]
 
@@ -89,13 +91,13 @@ def train(x, cond, modules, optimizer, kl_anneal, args, epoch,device):
         if i < args.n_past or use_teacher_forcing:
             z_t, mu, logvar = modules['posterior'](h_target)#gaussian_lstm
             h_pred = modules['frame_predictor'](torch.cat([h, z_t, cond[i]], 1))#lstm
-            x_pred = modules['decoder']([h_pred, skip],cond[i])
+            x_pred = modules['decoder']([h_pred, skip])
             mse += mse_criterion(x_pred, x[i])
             kld += kl_criterion(mu, logvar,args)
         else:
             z_t = torch.from_numpy(np.random.normal(0,1,size=(args.batch_size,64))).float().to(device)
             h_pred = modules['frame_predictor'](torch.cat([h, z_t, cond[i]], 1))#lstm
-            x_pred = modules['decoder']([h_pred, skip],cond[i])
+            x_pred = modules['decoder']([h_pred, skip])
             mse += mse_criterion(x_pred, x[i])
             pred.append(x_pred)
             
@@ -113,7 +115,7 @@ def train(x, cond, modules, optimizer, kl_anneal, args, epoch,device):
 def pred(validate_seq, validate_cond, modules, args, device):
     modules['frame_predictor'].eval()
     modules['posterior'].eval()
-    modules['prior'].eval()
+    #modules['prior'].eval()
     modules['encoder'].eval()
     modules['decoder'].eval()
     mse_criterion = nn.MSELoss()
@@ -124,12 +126,12 @@ def pred(validate_seq, validate_cond, modules, args, device):
     with torch.no_grad():
         for i in range(1, args.n_past + args.n_future):
             if i-1 < args.n_past:
-                h = modules['encoder'](validate_seq[i-1],validate_cond[i-1])
+                h = modules['encoder'](validate_seq[i-1])
             else:
-                h = modules['encoder'](img_seq[i-1],validate_cond[i-1])
+                h = modules['encoder'](img_seq[i-1])
 
             if i < args.n_past:
-                h_target = modules['encoder'](validate_seq[i],validate_cond[i])[0]
+                h_target = modules['encoder'](validate_seq[i])[0]
 
             if args.last_frame_skip or i < args.n_past:        
                 h, skip = h
@@ -139,45 +141,17 @@ def pred(validate_seq, validate_cond, modules, args, device):
             if i < args.n_past:
                 z_t, mu, logvar = modules['posterior'](h_target)#gaussian_lstm
                 h_pred = modules['frame_predictor'](torch.cat([h, z_t, validate_cond[i]], 1))#lstm
-                x_pred = modules['decoder']([h_pred, skip],validate_cond[i])
+                x_pred = modules['decoder']([h_pred, skip])
                 #mse += mse_criterion(x_pred, validate_seq[i])
                 #kld += kl_criterion(mu, logvar,args)
             
             else:
                 z_t = torch.from_numpy(np.random.normal(0,1,size=(args.batch_size,64))).float().to(device)
                 h_pred = modules['frame_predictor'](torch.cat([h, z_t, validate_cond[i]], 1))#lstm
-                x_pred = modules['decoder']([h_pred, skip],validate_cond[i])
+                x_pred = modules['decoder']([h_pred, skip])
                 #mse += mse_criterion(x_pred, validate_seq[i])
                 img_seq.append(x_pred)
-    '''
-    
-    
-    modules['frame_predictor'].eval()
-    modules['posterior'].eval()
-    modules['prior'].eval()
-    modules['encoder'].eval()
-    modules['decoder'].eval()
-    mse_criterion = nn.MSELoss()
-    mse = 0
-    kld = 0
-    img_seq = []
-    with torch.no_grad():
-        for i in range(1, args.n_past + args.n_future):
-            h = modules['encoder'](validate_seq[i-1],validate_cond[i-1])
-            h_target = modules['encoder'](validate_seq[i],validate_cond[i])[0]
-            if args.last_frame_skip or i < args.n_past:        
-                h, skip = h
-            else:
-                h = h[0]
-            z_t, mu, logvar = modules['posterior'](h_target)
-            #_, mu_p, logvar_p = modules['prior'](h)
-            h_pred = modules['frame_predictor'](torch.cat([h, z_t], 1))
-            x_pred = modules['decoder']([h_pred, skip],validate_cond[i])
-            img_seq.append(x_pred)
-            mse += mse_criterion(x_pred, validate_seq[i])
-            kld += kl_criterion(mu, logvar, args)
-            #kld += kl_criterion(mu, logvar, mu_p, logvar_p,args)
-    '''
+
     return img_seq
 
 class kl_annealing():
@@ -186,14 +160,10 @@ class kl_annealing():
         self.cyclical_flag = args.kl_anneal_cyclical
         self.ratio = args.kl_anneal_ratio
         self.cycle = args.kl_anneal_cycle
-        self.period = args.epoch_size // self.cycle
-        self.thres = args.epoch_size // 10
+        self.period = args.niter // self.cycle
+        self.thres = args.niter // 10
         self.slope = 1.0 / self.thres
         self.c_slope = 1.0 / (self.period // 2)
-    
-    def update(self):
-        pass
-        #raise NotImplementedError
     
     def get_beta(self,epoch):
         if self.cyclical_flag:
@@ -246,7 +216,7 @@ def main():
     else:
         #name = 'rnn_size=%d-predictor-posterior-rnn_layers=%d-%d-n_past=%d-n_future=%d-lr=%.4f-g_dim=%d-z_dim=%d-last_frame_skip=%s-beta=%.7f'\
         #    % (args.rnn_size, args.predictor_rnn_layers, args.posterior_rnn_layers, args.n_past, args.n_future, args.lr, args.g_dim, args.z_dim, args.last_frame_skip, args.beta)
-        name = "cVAE_past2"
+        name = args.name
         args.log_dir = '%s/%s' % (args.log_dir, name)
         niter = args.niter
         start_epoch = 0
@@ -273,14 +243,14 @@ def main():
     if args.model_dir != '':
         frame_predictor = saved_model['frame_predictor']
         posterior = saved_model['posterior']
-        prior = saved_model['prior']
+        #prior = saved_model['prior']
     else:
         frame_predictor = lstm(args.g_dim+args.z_dim+7, args.g_dim, args.rnn_size, args.predictor_rnn_layers, args.batch_size, device)
         posterior = gaussian_lstm(args.g_dim, args.z_dim, args.rnn_size, args.posterior_rnn_layers, args.batch_size, device)
-        prior = gaussian_lstm(args.g_dim, args.z_dim, args.rnn_size, args.posterior_rnn_layers, args.batch_size, device)
+        #prior = gaussian_lstm(args.g_dim, args.z_dim, args.rnn_size, args.posterior_rnn_layers, args.batch_size, device)
         frame_predictor.apply(init_weights)
         posterior.apply(init_weights)
-        prior.apply(init_weights)
+        #prior.apply(init_weights)
             
     if args.model_dir != '':
         decoder = saved_model['decoder']
@@ -294,13 +264,13 @@ def main():
     # --------- transfer to device ------------------------------------
     frame_predictor.to(device)
     posterior.to(device)
-    prior.to(device)
+    #prior.to(device)
     encoder.to(device)
     decoder.to(device)
 
     # --------- load a dataset ------------------------------------
     train_data = bair_robot_pushing_dataset(args, 'train')
-    validate_data = bair_robot_pushing_dataset(args, 'validate')
+    validate_data = bair_robot_pushing_dataset(args, 'test')
     
     train_loader = DataLoader(train_data,
                             num_workers=args.num_workers,
@@ -309,7 +279,6 @@ def main():
                             drop_last=True,
                             pin_memory=True)
     train_iter = get_batch(train_loader)
-    #train_iterator = iter(train_loader)
 
     validate_loader = DataLoader(validate_data,
                             num_workers=args.num_workers,
@@ -318,7 +287,6 @@ def main():
                             drop_last=True,
                             pin_memory=True)
     validate_iter = get_batch(validate_loader)
-    #validate_iterator = iter(validate_loader)
 
     # ---------------- optimizers ----------------
     if args.optimizer == 'adam':
@@ -330,8 +298,9 @@ def main():
     else:
         raise ValueError('Unknown optimizer: %s' % args.optimizer)
 
-    params = list(frame_predictor.parameters()) + list(posterior.parameters()) + list(encoder.parameters()) + list(decoder.parameters()) + list(prior.parameters())
-    optimizer = args.optimizer(params, lr=args.lr, betas=(args.beta1, 0.999))
+    params = list(frame_predictor.parameters()) + list(posterior.parameters()) + list(encoder.parameters()) + list(decoder.parameters()) #+ list(prior.parameters())
+    #optimizer = args.optimizer(params, lr=args.lr, betas=(args.beta1, 0.999))
+    optimizer = args.optimizer(params, lr=args.lr)
     kl_anneal = kl_annealing(args)
 
     modules = {
@@ -339,7 +308,7 @@ def main():
         'posterior': posterior,
         'encoder': encoder,
         'decoder': decoder,
-        'prior':prior,
+        #'prior':prior,
     }
 
     epoch_list = []
@@ -366,7 +335,7 @@ def main():
     for epoch in range(start_epoch, start_epoch + niter):
         frame_predictor.train()
         posterior.train()
-        prior.train()
+        #prior.train()
         encoder.train()
         decoder.train()
 
@@ -403,7 +372,7 @@ def main():
         frame_predictor.eval()
         encoder.eval()
         decoder.eval()
-        prior.eval()
+        #prior.eval()
         posterior.eval()
         ave_psnr = 0
         #if epoch % 5 == 0:
@@ -433,7 +402,7 @@ def main():
                 'decoder': decoder,
                 'frame_predictor': frame_predictor,
                 'posterior': posterior,
-                'prior': prior,
+                #'prior': prior,
                 'args': args,
                 'last_epoch': epoch},
                 '%s/model.pth' % args.log_dir)
@@ -445,12 +414,12 @@ def main():
                 validate_iter = get_batch(validate_loader)
                 validate_seq, validate_cond = next(validate_iter)
 
-            plot_pred(validate_seq, validate_cond, modules, epoch, args)
+            plot_pred(validate_seq, validate_cond, modules, epoch, args,device)
             fname = '%s/gen/pred_%d.gif' % (args.log_dir, epoch)
             img_seq = pred(validate_seq, validate_cond, modules, args, device)
             gif = []
-            for img in img_seq:
-                gif.append(tensor_to_img(img[0]))
+            for img,gt in zip(img_seq,validate_seq):
+                gif.append(np.concatenate([tensor_to_img(gt[0]),tensor_to_img(img[0])],axis=1))
             
             imageio.mimsave(fname,gif,duration=0.5)
 
