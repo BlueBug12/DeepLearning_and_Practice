@@ -116,11 +116,11 @@ def is_sequence(arg):
             (hasattr(arg, "__getitem__") or
             hasattr(arg, "__iter__")))
 
-def plot_pred(validate_seq, validate_cond, modules, epoch, args):
+def plot_pred(validate_seq, validate_cond, modules, epoch, args, device):
     #shape of validate_seq: ((n_past+n_future) x batch_size x 3 x 64 x 64)
     modules['frame_predictor'].eval()
     modules['posterior'].eval()
-    modules['prior'].eval()
+    #modules['prior'].eval()
     modules['encoder'].eval()
     modules['decoder'].eval()
     nsample = 20 
@@ -130,30 +130,31 @@ def plot_pred(validate_seq, validate_cond, modules, epoch, args):
     for s in range(nsample):
         modules['frame_predictor'].eval()
         modules['posterior'].eval()
-        modules['prior'].eval()
+        #modules['prior'].eval()
         modules['encoder'].eval()
         modules['decoder'].eval()
         
         gen_seq[s].append(validate_seq[0])
         x_in = validate_seq[0]
         for i in range(1, args.n_eval):
-            h = modules['encoder'](x_in,validate_cond[i-1])
+            h = modules['encoder'](x_in)
             if args.last_frame_skip or i < args.n_past:	
                 h, skip = h
             else:
                 h, _ = h
             h = h.detach()
             if i < args.n_past:
-                h_target = modules['encoder'](validate_seq[i],validate_cond[i])
+                h_target = modules['encoder'](validate_seq[i])
                 h_target = h_target[0].detach()
                 z_t, _, _ = modules['posterior'](h_target)
                 modules['frame_predictor'](torch.cat([h, z_t,validate_cond[i]], 1))
                 x_in = validate_seq[i]
                 gen_seq[s].append(x_in)
             else:
-                z_t, _, _ = modules['prior'](h)
+                #z_t, _, _ = modules['prior'](h)
+                z_t = torch.from_numpy(np.random.normal(0,1,size=(args.batch_size,64))).float().to(device)
                 h = modules['frame_predictor'](torch.cat([h, z_t,validate_cond[i]], 1)).detach()
-                x_in = modules['decoder']([h, skip],validate_cond[i]).detach()
+                x_in = modules['decoder']([h, skip]).detach()
                 gen_seq[s].append(x_in)
 
     to_plot = []

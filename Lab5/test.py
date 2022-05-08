@@ -202,6 +202,8 @@ def main():
         args.optimizer = optim.Adam
     elif args.optimizer == 'rmsprop':
         args.optimizer = optim.RMSprop
+    elif args.optimizer == 'radam':
+        args.optimizer = optim.RAdam
     elif args.optimizer == 'sgd':
         args.optimizer = optim.SGD
     else:
