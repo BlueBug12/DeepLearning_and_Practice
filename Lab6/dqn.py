@@ -6,11 +6,12 @@ from collections import deque
 import itertools
 import random
 import time
-
+import os
 import gym
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -37,12 +38,16 @@ class ReplayMemory:
 class Net(nn.Module):
     def __init__(self, state_dim=8, action_dim=4, hidden_dim=32):
         super().__init__()
-        ## TODO ##
-        raise NotImplementedError
+        self.net = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, action_dim)
+        )
 
     def forward(self, x):
-        ## TODO ##
-        raise NotImplementedError
+        return self.net(x)
 
 
 class DQN:
@@ -51,9 +56,7 @@ class DQN:
         self._target_net = Net().to(args.device)
         # initialize target network
         self._target_net.load_state_dict(self._behavior_net.state_dict())
-        ## TODO ##
-        # self._optimizer = ?
-        raise NotImplementedError
+        self._optimizer = optim.Adam(self._behavior_net.parameters(), lr = args.lr)
         # memory
         self._memory = ReplayMemory(capacity=args.capacity)
 
@@ -66,8 +69,14 @@ class DQN:
 
     def select_action(self, state, epsilon, action_space):
         '''epsilon-greedy based on behavior network'''
-         ## TODO ##
-        raise NotImplementedError
+        if random.random() > epsilon:
+            state_tensor = torch.tensor(state, device = self.device).reshape(1, -1)
+            with torch.no_grad():
+                actions = self._behavior_net(state_tensor)
+            return torch.max(actions, dim = 1)[1].item()#pick argmax index
+        else:
+            return action_space.sample()
+
 
     def append(self, state, action, reward, next_state, done):
         self._memory.append(state, [action], [reward / 10], next_state,
@@ -84,14 +93,12 @@ class DQN:
         state, action, reward, next_state, done = self._memory.sample(
             self.batch_size, self.device)
 
-        ## TODO ##
-        # q_value = ?
-        # with torch.no_grad():
-        #    q_next = ?
-        #    q_target = ?
-        # criterion = ?
-        # loss = criterion(q_value, q_target)
-        raise NotImplementedError
+        q_value = self._behavior_net(state).gather(dim=1, index=action.long())
+        with torch.no_grad():
+            q_next = torch.max(self._target_net(next_state), dim = 1)[0].reshape(-1,1)
+            q_target = reward + gamma * q_next * (1 - done)
+        loss = nn.MSELoss()(q_value, q_target)
+
         # optimize
         self._optimizer.zero_grad()
         loss.backward()
@@ -100,8 +107,7 @@ class DQN:
 
     def _update_target_network(self):
         '''update target network by copying from behavior network'''
-        ## TODO ##
-        raise NotImplementedError
+        self._target_net.load_state_dict(self._behavior_net.state_dict())
 
     def save(self, model_path, checkpoint=False):
         if checkpoint:
@@ -173,12 +179,18 @@ def test(args, env, agent, writer):
         total_reward = 0
         env.seed(seed)
         state = env.reset()
-        ## TODO ##
-        # ...
-        #     if done:
-        #         writer.add_scalar('Test/Episode Reward', total_reward, n_episode)
-        #         ...
-        raise NotImplementedError
+        for t in itertools.count(start=1):
+            if args.render:
+                env.render()
+            action = agent.select_action(state, epsilon, action_space)
+            state, reward, done, _ = env.step(action)
+            total_reward += reward
+            rewards.append(total_reward)
+            if done:
+                writer.add_scalar('Test/Episode Reward', total_reward, n_episode)
+                print(f'Length: {t:3d}\tTotal reward: {total_reward:.2f}')
+                break
+
     print('Average Reward', np.mean(rewards))
     env.close()
 
@@ -189,6 +201,7 @@ def main():
     parser.add_argument('-d', '--device', default='cuda')
     parser.add_argument('-m', '--model', default='dqn.pth')
     parser.add_argument('--logdir', default='log/dqn')
+    parser.add_argument("--gpu_index", default='1',type=str)
     # train
     parser.add_argument('--warmup', default=10000, type=int)
     parser.add_argument('--episode', default=1200, type=int)
@@ -208,6 +221,8 @@ def main():
     args = parser.parse_args()
 
     ## main ##
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_index
+    args.device = torch.device('cuda')
     env = gym.make('LunarLander-v2')
     agent = DQN(args)
     writer = SummaryWriter(args.logdir)
