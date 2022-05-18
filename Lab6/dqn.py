@@ -185,10 +185,11 @@ def test(args, env, agent, writer):
             action = agent.select_action(state, epsilon, action_space)
             state, reward, done, _ = env.step(action)
             total_reward += reward
-            rewards.append(total_reward)
+            
             if done:
                 writer.add_scalar('Test/Episode Reward', total_reward, n_episode)
                 print(f'Length: {t:3d}\tTotal reward: {total_reward:.2f}')
+                rewards.append(total_reward)
                 break
 
     print('Average Reward', np.mean(rewards))
