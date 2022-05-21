@@ -1,4 +1,4 @@
-'''DLP DQN Lab'''
+'''DLP DDQN Lab'''
 __author__ = 'chengscott'
 __copyright__ = 'Copyright 2020, NCTU CGI Lab'
 import argparse
@@ -36,7 +36,7 @@ class ReplayMemory:
 
 
 class Net(nn.Module):
-    def __init__(self, state_dim=8, action_dim=4, hidden_dim=512):
+    def __init__(self, state_dim=8, action_dim=4, hidden_dim=256):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(state_dim, hidden_dim),
@@ -50,7 +50,7 @@ class Net(nn.Module):
         return self.net(x)
 
 
-class DQN:
+class DDQN:
     def __init__(self, args):
         self._behavior_net = Net().to(args.device)
         self._target_net = Net().to(args.device)
@@ -94,7 +94,8 @@ class DQN:
         q_value = self._behavior_net(state).gather(dim=1, index=action.long())
 
         with torch.no_grad():
-            q_next = torch.max(self._target_net(next_state), dim = 1)[0].reshape(-1,1)
+            q_next_idx = torch.max(self._target_net(next_state), dim = 1)[1].long().reshape(-1,1)
+            q_next = self._target_net(next_state).gather(dim=1,index = q_next_idx)
             q_target = reward + gamma * q_next * (1 - done)
         loss = nn.MSELoss()(q_value, q_target)
 
@@ -199,8 +200,8 @@ def main():
     ## arguments ##
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('-d', '--device', default='cuda')
-    parser.add_argument('-m', '--model', default='models/dqn.pth')
-    parser.add_argument('--logdir', default='log/dqn')
+    parser.add_argument('-m', '--model', default='models/ddqn.pth')
+    parser.add_argument('--logdir', default='log/ddqn')
     parser.add_argument("--gpu_index", default='1',type=str)
     # train
     parser.add_argument('--warmup', default=10000, type=int)
@@ -224,7 +225,7 @@ def main():
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_index
     args.device = torch.device('cuda')
     env = gym.make('LunarLander-v2')
-    agent = DQN(args)
+    agent = DDQN(args)
     writer = SummaryWriter(args.logdir)
     if not args.test_only:
         train(args, env, agent, writer)

@@ -51,7 +51,8 @@ class ActorNet(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim[0], hidden_dim[1]),
             nn.ReLU(),
-            nn.Linear(hidden_dim[1], action_dim)
+            nn.Linear(hidden_dim[1], action_dim),
+            nn.Tanh()
         )
 
     def forward(self, x):
@@ -110,7 +111,7 @@ class DDPG:
             action = self._actor_net(state_tensor)
             if noise:
                 noise_tensor = torch.tensor(self._action_noise.sample(), device=self.device).reshape(1, -1)	
-                action += noise_tensor	
+                action += noise_tensor
         return action.squeeze().cpu().numpy()
 
     def append(self, state, action, reward, next_state, done):
@@ -121,18 +122,15 @@ class DDPG:
         # update the behavior networks
         self._update_behavior_network(self.gamma)
         # update the target networks
-        self._update_target_network(self._target_actor_net, self._actor_net,
-                                    self.tau)
-        self._update_target_network(self._target_critic_net, self._critic_net,
-                                    self.tau)
+        self._update_target_network(self._target_actor_net, self._actor_net, self.tau)
+        self._update_target_network(self._target_critic_net, self._critic_net, self.tau)
 
     def _update_behavior_network(self, gamma):
         actor_net, critic_net, target_actor_net, target_critic_net = self._actor_net, self._critic_net, self._target_actor_net, self._target_critic_net
         actor_opt, critic_opt = self._actor_opt, self._critic_opt
 
         # sample a minibatch of transitions
-        state, action, reward, next_state, done = self._memory.sample(
-            self.batch_size, self.device)
+        state, action, reward, next_state, done = self._memory.sample(self.batch_size, self.device)
 
         ## update critic ##
         # critic loss
@@ -262,14 +260,14 @@ def main():
     ## arguments ##
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('-d', '--device', default='cuda')
-    parser.add_argument('-m', '--model', default='ddpg.pth')
+    parser.add_argument('-m', '--model', default='models/ddpg.pth')
     parser.add_argument('--logdir', default='log/ddpg')
     parser.add_argument("--gpu_index", default='0',type=str)
     # train
     parser.add_argument('--warmup', default=10000, type=int)
     parser.add_argument('--episode', default=1200, type=int)
     parser.add_argument('--batch_size', default=64, type=int)
-    parser.add_argument('--capacity', default=500000, type=int)
+    parser.add_argument('--capacity', default=5000000, type=int)
     parser.add_argument('--lra', default=1e-3, type=float)
     parser.add_argument('--lrc', default=1e-3, type=float)
     parser.add_argument('--gamma', default=.99, type=float)
@@ -277,7 +275,7 @@ def main():
     # test
     parser.add_argument('--test_only', action='store_true')
     parser.add_argument('--render', action='store_true')
-    parser.add_argument('--seed', default=20200519, type=int)
+    parser.add_argument('--seed', default=87, type=int)
     args = parser.parse_args()
 
     ## main ##
