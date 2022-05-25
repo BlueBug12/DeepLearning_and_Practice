@@ -51,7 +51,9 @@ def train( netG, netD, optimizerG, optimizerD, criterion, train_loader,
     best_acc = 0
     batch_done = 0
     pbar_epoch = tqdm(range(num_epochs))
+    counter = 0
     for epoch in pbar_epoch:
+        counter += 1
         netG.train()
         netD.train()
         losses_g = 0
@@ -69,6 +71,9 @@ def train( netG, netD, optimizerG, optimizerD, criterion, train_loader,
             
             netD.zero_grad()
             label = torch.full((batch,), real_label, dtype=torch.float, device=device)
+            label += torch.normal(torch.zeros(batch), torch.ones(batch)*0.1/counter).to(device)
+            torch.clamp(label, max=1, min=0)
+
             output = netD(images, conds).view(-1)
             # Calculate loss on all-real batch
             errD_real = criterion(output, label)
@@ -82,6 +87,8 @@ def train( netG, netD, optimizerG, optimizerD, criterion, train_loader,
             # Generate fake image batch with G
             fake = netG(noise, conds)
             label.fill_(fake_label)
+            label += torch.normal(torch.zeros(batch), torch.ones(batch)*0.1/counter).to(device)
+            torch.clamp(label, max=1, min=0)
             # Classify all fake batch with D
             output = netD(fake.detach(), conds).view(-1)
             # Calculate D's loss on the all-fake batch
@@ -90,7 +97,7 @@ def train( netG, netD, optimizerG, optimizerD, criterion, train_loader,
             errD_fake.backward()
             #if losses_g < losses_d :
             # Update D
-            if batch_idx % 2:
+            if batch_idx % 5 == 0:
                 optimizerD.step()
             D_G_z1 = output.mean().item()
             # Compute error of D as sum over the fake and the real batches
@@ -103,6 +110,8 @@ def train( netG, netD, optimizerG, optimizerD, criterion, train_loader,
             netG.zero_grad()
             # fake labels are real for generator cost
             label.fill_(real_label)
+            label += torch.normal(torch.zeros(batch), torch.ones(batch)*0.1/counter).to(device)
+            torch.clamp(label, max=1, min=0)
             # Since we just updated D, perform another forward pass of all-fake batch through D
             output = netD(fake, conds).view(-1)
             # Calculate G's loss based on this output
@@ -124,7 +133,7 @@ def train( netG, netD, optimizerG, optimizerD, criterion, train_loader,
             if batch_done%eval_interval == 0:
                 eval_acc, gen_images = evaluate(netG, test_loader, eval_model, n_z, device)
                 gen_images = 0.5*gen_images + 0.5
-                logger.add_scalar('batch/eval_acc', eval_acc, batch_done)
+                #logger.add_scalar('batch/eval_acc', eval_acc, batch_done)
                 if eval_acc > best_acc:
                     best_acc = eval_acc
                     torch.save(
