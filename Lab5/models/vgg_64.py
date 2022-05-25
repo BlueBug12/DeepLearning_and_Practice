@@ -47,7 +47,7 @@ class vgg_encoder(nn.Module):
                 )
         self.mp = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
 
-    def forward(self, input,cond):
+    def forward(self, input):
         '''
         h0: torch.Size([10, 3, 64, 64])
         h1: torch.Size([10, 64, 64, 64])
@@ -102,7 +102,7 @@ class vgg_decoder(nn.Module):
                 )
         self.up = nn.UpsamplingNearest2d(scale_factor=2)
 
-    def forward(self, input,cond):
+    def forward(self, input):
         vec, skip = input 
         d1 = self.upc1(vec.view(-1, self.dim, 1, 1)) # 1 -> 4
         up1 = self.up(d1) # 4 -> 8
