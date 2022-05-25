@@ -910,12 +910,11 @@ int main(int argc, const char* argv[]) {
 	// initialize the features
 	tdl.add_feature(new pattern({ 0, 1, 2, 3, 4, 5 }));
 	tdl.add_feature(new pattern({ 4, 5, 6, 7, 8, 9 }));
-    //tdl.add_feature(new pattern({ 0, 1, 2, 3, 4, 5, 9}));
 	tdl.add_feature(new pattern({ 0, 1, 2, 4, 5, 6 }));
 	tdl.add_feature(new pattern({ 4, 5, 6, 8, 9, 10 }));
 
-    std::string model_name = "test_model_";
-    std::string log_name = "test.csv";
+    std::string model_name = "4_6_model";
+    std::string log_name = "4_6.csv";
 
 	// restore the model from file
 	tdl.load(model_name);
