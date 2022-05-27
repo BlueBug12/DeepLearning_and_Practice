@@ -24,7 +24,6 @@ def evaluate(g_model, loader, eval_model, n_z, device):
         for _, conds in enumerate(loader):
             conds = conds.to(device)
             batch = conds.shape[0]
-            #z = sample_z(conds.shape[0], n_z).to(device)
             noise = torch.randn(batch, n_z, 1, 1, device=device)
             fake_images = g_model(noise, conds)
             if gen_images is None:
@@ -45,8 +44,6 @@ def train( netG, netD, optimizerG, optimizerD, criterion, train_loader,
     real_label = 1.
     fake_label = 0.
     
-    
-
     eval_model = evaluation_model()
     best_acc = 0
     batch_done = 0
@@ -95,10 +92,11 @@ def train( netG, netD, optimizerG, optimizerD, criterion, train_loader,
             errD_fake = criterion(output, label)
             # Calculate the gradients for this batch, accumulated (summed) with previous gradients
             errD_fake.backward()
-            #if losses_g < losses_d :
-            # Update D
-            if batch_idx % 5 == 0:
+            if losses_g < losses_d :
                 optimizerD.step()
+            # Update D
+            #if batch_idx % 5 == 0:
+            #    optimizerD.step()
             D_G_z1 = output.mean().item()
             # Compute error of D as sum over the fake and the real batches
             errD = errD_real + errD_fake
@@ -118,9 +116,9 @@ def train( netG, netD, optimizerG, optimizerD, criterion, train_loader,
             errG = criterion(output, label)
             # Calculate gradients for G
             errG.backward()
-            #if losses_g > losses_d :
+            if losses_g > losses_d :
                 # Update G
-            optimizerG.step()
+                optimizerG.step()
             D_G_z2 = output.mean().item()
             pbar_batch.set_description('[{}/{}][{}/{}][Loss_D={:.4f}][Loss_G={:.4f}][D(x)={:.4f}][D(G(z))={:.4f}/{:.4f}]'
                 .format(epoch+1, num_epochs, batch_idx+1, len(train_loader), errD.item(), errG.item(), D_x, D_G_z1, D_G_z2))
@@ -132,36 +130,23 @@ def train( netG, netD, optimizerG, optimizerD, criterion, train_loader,
 
             if batch_done%eval_interval == 0:
                 eval_acc, gen_images = evaluate(netG, test_loader, eval_model, n_z, device)
-                gen_images = 0.5*gen_images + 0.5
-                #logger.add_scalar('batch/eval_acc', eval_acc, batch_done)
                 if eval_acc > best_acc:
                     best_acc = eval_acc
-                    torch.save(
-                        netG.state_dict(),
-                        os.path.join(model_dir, f'epoch{epoch+1}_iter{batch_done}_eval-acc{eval_acc:.4f}.cpt'))
-                #save_image(gen_images, os.path.join(result_dir, f'epoch{epoch+1}_iter{batch_done}.png'), nrow=8)
-                #save_image(gen_images, 'gan_current.png', nrow=8)
+                    torch.save(netG.state_dict(),os.path.join(model_dir, f'epoch{epoch+1}_iter{batch_done}_eval-acc{eval_acc:.4f}.cpt'))
                 netG.train()
-                #netD.train()
 
         avg_loss_g = losses_g / len(train_loader)
         avg_loss_d = losses_d / len(train_loader)
         eval_acc, gen_images = evaluate(netG, test_loader, eval_model, n_z, device)
-        gen_images = 0.5*gen_images + 0.5
-        pbar_epoch.set_description('[{}/{}][AvgLossD={:.4f}][AvgLossG={:.4f}][EvalAcc={:.4f}]'
-            .format(epoch+1, num_epochs, avg_loss_d, avg_loss_g, eval_acc))
+        pbar_epoch.set_description('[{}/{}][AvgLossD={:.4f}][AvgLossG={:.4f}][EvalAcc={:.4f}]'.format(epoch+1, num_epochs, avg_loss_d, avg_loss_g, eval_acc))
         
         logger.add_scalar('epoch/loss_g', avg_loss_g, epoch+1)
         logger.add_scalar('epoch/loss_d', avg_loss_d, epoch+1)
         logger.add_scalar('epoch/eval_acc', eval_acc, epoch+1)
         if eval_acc > best_acc:
             best_acc = eval_acc
-            torch.save(
-                netG.state_dict(),
-                os.path.join(model_dir, f'epoch{epoch+1}_last_eval-acc{eval_acc:.4f}.cpt'))
-        save_image(gen_images, os.path.join(result_dir, f'epoch{epoch+1}_last.png'), nrow=8)
-        #save_image(gen_images, 'gan_current.png', nrow=8)
-
+            torch.save(netG.state_dict(),os.path.join(model_dir, f'epoch{epoch+1}_last_eval-acc{eval_acc:.4f}.cpt'))
+        save_image(0.5*gen_images + 0.5, os.path.join(result_dir, f'epoch{epoch+1}_last.png'), nrow=8)
 
 if __name__ == '__main__':
     parser = ArgumentParser()
@@ -170,7 +155,6 @@ if __name__ == '__main__':
     parser.add_argument('--ngf', type=int, default=64)
     parser.add_argument('--ndf', type=int, default=64)
     parser.add_argument('--img_size', type=int, default=64)
-    #parser.add_argument('--add_bias', action='store_true', default=False)
     parser.add_argument('--num_epochs', type=int, default=1000)
     parser.add_argument('--lr', type=float, default=2e-4)
     parser.add_argument('--beta1', type=float, default=0.5)
@@ -185,7 +169,7 @@ if __name__ == '__main__':
     parser.add_argument('--json_dir',type=str, default='./')
     parser.add_argument('--seed',type=int, default=87)
     parser.add_argument('--task_name',type=str,default="test")
-    parser.add_argument('--gpu_index',type=str,default='1')
+    parser.add_argument('--gpu_index',type=str,default='0')
 
     args = parser.parse_args()
 
@@ -237,7 +221,6 @@ if __name__ == '__main__':
     criterion = nn.BCELoss()
     optimizerG = optim.Adam(netG.parameters(), args.lr, betas=(args.beta1, args.beta2))
     optimizerD = optim.Adam(netD.parameters(), args.lr, betas=(args.beta1, args.beta2))
-    #optimizerD = optim.SGD(netD.parameters(), args.lr)
 
     train(
         netG=netG,
